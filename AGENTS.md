@@ -11,7 +11,8 @@ Runtime identity:
 - executable: `regardingwork-meetings`
 - Swift target: `RegardingWorkMeetings`
 - bundle and LaunchAgent: `com.regardingwork.meetings`
-- recordings: `~/RegardingWork/Meetings`
+- recordings: `~/RegardingWork Meetings`
+- legacy discovery only: `~/RegardingWork/Meetings`
 
 Quill and Digimata names may appear only in original licensing, upstream
 attribution, upstream remote documentation, or migration history. Never rewrite

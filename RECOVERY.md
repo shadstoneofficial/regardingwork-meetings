@@ -9,7 +9,9 @@ owner PID, expected tracks, start time, first-buffer times, and recent health.
 On clean stop it writes `meta.json` first and then removes the in-progress
 manifest.
 
-At relaunch, the app scans the recordings root:
+At relaunch, the app scans the current recordings root. When the new default
+`~/RegardingWork Meetings` is active, it also scans the former
+`~/RegardingWork/Meetings` default without moving or deleting it:
 
 1. A manifest whose owner PID still appears active is deferred.
 2. Malformed manifests are preserved and reported.
@@ -25,10 +27,18 @@ Recovery never fabricates a missing source, overwrites an existing completed
 session, or deletes original audio. A recovered transcript can be one-sided and
 contains health warnings.
 
+If recording stopped cleanly but transcription was interrupted, `meta.json`
+and the CAF files remain. Because `transcript.json` is the completion marker,
+the app queues that session again after relaunch and transcribes it from the
+beginning. It does not resume from a partial timestamp. Closing the MacBook lid
+normally suspends the running process and allows work to continue after wake,
+but waiting for completion before shutdown is safest.
+
 For manual inspection:
 
 ```sh
-find ~/RegardingWork/Meetings -name 'recording*.json' -o -name 'meta.json'
+find "$HOME/RegardingWork Meetings" -name 'recording*.json' -o -name 'meta.json'
+find "$HOME/RegardingWork/Meetings" -name 'recording*.json' -o -name 'meta.json'
 afinfo "/path/to/session/mic.caf"
 afinfo "/path/to/session/system.caf"
 ```

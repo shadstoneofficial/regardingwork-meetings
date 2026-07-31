@@ -1,8 +1,26 @@
 import AppKit
 
+enum MenuBarActivity: Equatable {
+    case idle
+    case transcribing
+    case transcriptionFailed
+    case recording
+
+    static func resolve(
+        recording: Bool,
+        transcriptionVisible: Bool,
+        transcriptionFailed: Bool
+    ) -> Self {
+        if recording { return .recording }
+        if transcriptionFailed { return .transcriptionFailed }
+        if transcriptionVisible { return .transcribing }
+        return .idle
+    }
+}
+
 /// Status bar item in the top-right of the menu bar. Shows recording state at
-/// a glance and provides the only persistent control surface for the daemon
-/// (since we run as `.accessory` — no dock icon, no main window).
+/// a glance and keeps recording controls available after the setup window is
+/// closed.
 @MainActor
 final class MenuBarController {
     private let statusItem: NSStatusItem
@@ -11,8 +29,11 @@ final class MenuBarController {
     private let recoveryLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
     private let toggleItem: NSMenuItem
+    private var recording = false
+    private var transcriptionFailed = false
 
     var onToggle: (() -> Void)?
+    var onShowSetup: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onQuit: (() -> Void)?
 
@@ -43,6 +64,13 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        let setup = NSMenuItem(
+            title: "Welcome & Setup…",
+            action: #selector(showSetupClicked),
+            keyEquivalent: ","
+        )
+        menu.addItem(setup)
+
         toggleItem = NSMenuItem(
             title: "Start recording",
             action: #selector(toggleClicked),
@@ -66,38 +94,78 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [toggleItem, openFolder, quit] {
+        for item in [setup, toggleItem, openFolder, quit] {
             item.target = self
         }
 
         statusItem.menu = menu
 
         if let button = statusItem.button {
-            let image = Self.waveformImage()
+            let image = Self.regardingWorkImage()
             image?.isTemplate = true
             button.image = image
             button.imagePosition = .imageLeft
+            button.toolTip = AppIdentity.productName
+            button.setAccessibilityLabel(AppIdentity.productName)
         }
     }
 
-    /// Reflect recording state in the icon tint and menu item titles. The
-    /// menu bar shows only the feather (red while recording); the elapsed
-    /// counter lives in the menu's state label. Call once a second while
-    /// recording.
+    /// Reflect recording state in the icon tint and menu item titles. Recording
+    /// takes visual precedence if a previous session is still transcribing.
     func update(recording: Bool, elapsed: String?) {
-        stateLabel.title = recording ? "● recording · \(elapsed ?? "0:00")" : "idle"
+        self.recording = recording
+        stateLabel.title = recording
+            ? "● recording · \(elapsed ?? "0:00")"
+            : idleStateTitle()
         toggleItem.title = recording ? "Stop recording" : "Start recording"
         if !recording { healthLabel.isHidden = true }
-        if recording {
+        updateStatusIcon()
+    }
+
+    private func updateStatusIcon() {
+        let activity = MenuBarActivity.resolve(
+            recording: recording,
+            transcriptionVisible: !transcriptionLabel.isHidden,
+            transcriptionFailed: transcriptionFailed
+        )
+        let button = statusItem.button
+        switch activity {
+        case .recording:
             let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
-            statusItem.button?.image = NSImage(
+            button?.image = NSImage(
                 systemSymbolName: "record.circle.fill",
                 accessibilityDescription: "Recording"
             )?.withSymbolConfiguration(configuration)
-            statusItem.button?.image?.isTemplate = false
-        } else {
-            statusItem.button?.image = Self.waveformImage()
-            statusItem.button?.image?.isTemplate = true
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — recording"
+            button?.setAccessibilityLabel("\(AppIdentity.productName) — recording")
+        case .transcribing:
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemBlue])
+            button?.image = NSImage(
+                systemSymbolName: "ellipsis.circle.fill",
+                accessibilityDescription: "Transcribing locally"
+            )?.withSymbolConfiguration(configuration)
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — transcribing locally"
+            button?.setAccessibilityLabel(
+                "\(AppIdentity.productName) — transcribing locally"
+            )
+        case .transcriptionFailed:
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
+            button?.image = NSImage(
+                systemSymbolName: "exclamationmark.triangle.fill",
+                accessibilityDescription: "Transcription needs attention"
+            )?.withSymbolConfiguration(configuration)
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — transcription needs attention"
+            button?.setAccessibilityLabel(
+                "\(AppIdentity.productName) — transcription needs attention"
+            )
+        case .idle:
+            button?.image = Self.regardingWorkImage()
+            button?.image?.isTemplate = true
+            button?.toolTip = AppIdentity.productName
+            button?.setAccessibilityLabel(AppIdentity.productName)
         }
     }
 
@@ -118,30 +186,45 @@ final class MenuBarController {
     /// Show transcription progress/failure as a second status line in the
     /// menu; nil hides it. Independent of recording state — a new recording
     /// can run while the last one transcribes.
-    func updateTranscription(_ text: String?) {
+    func updateTranscription(_ text: String?, failed: Bool = false) {
+        transcriptionFailed = text != nil && failed
         transcriptionLabel.title = text ?? ""
         transcriptionLabel.isHidden = text == nil
+        if !recording {
+            stateLabel.title = idleStateTitle()
+        }
+        updateStatusIcon()
     }
 
-    // Code-native brand asset: a simple local-audio waveform.
-    private static let waveformSVG = """
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-    stroke-linecap="round">
-    <path d="M3 12h2m2-4v8m3-11v14m3-10v6m3-8v10m3-5h2"/>
+    private func idleStateTitle() -> String {
+        if transcriptionFailed { return "transcription needs attention" }
+        if !transcriptionLabel.isHidden { return "transcribing locally…" }
+        return "idle"
+    }
+
+    // Code-native monochrome monogram. This intentionally differs from the
+    // waveform used by RegardingWork Dictate so both apps remain recognizable
+    // when they are running together.
+    private static let regardingWorkSVG = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="26" height="18"
+    viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 15V3.5h4.2c2.5 0 4 1.3 4 3.4s-1.5 3.4-4 3.4H2.5
+    M7 10.3 11 15
+    M13 3.5 15.2 15l3.1-7.5 3.1 7.5 2.1-11.5"/>
     </svg>
     """
 
-    private static func waveformImage() -> NSImage? {
-        guard let data = waveformSVG.data(using: .utf8),
+    private static func regardingWorkImage() -> NSImage? {
+        guard let data = regardingWorkSVG.data(using: .utf8),
               let image = NSImage(data: data)
         else { return nil }
-        // Menu-bar status icons are nominally 18pt tall; size the SVG to match.
-        image.size = NSSize(width: 16, height: 16)
+        image.size = NSSize(width: 24, height: 16)
         return image
     }
 
     @objc private func toggleClicked() { onToggle?() }
+    @objc private func showSetupClicked() { onShowSetup?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func quitClicked() { onQuit?() }
 }
