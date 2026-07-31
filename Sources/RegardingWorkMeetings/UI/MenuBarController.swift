@@ -81,10 +81,12 @@ final class MenuBarController {
         statusItem.menu = menu
 
         if let button = statusItem.button {
-            let image = Self.waveformImage()
+            let image = Self.regardingWorkImage()
             image?.isTemplate = true
             button.image = image
             button.imagePosition = .imageLeft
+            button.toolTip = AppIdentity.productName
+            button.setAccessibilityLabel(AppIdentity.productName)
         }
     }
 
@@ -104,7 +106,7 @@ final class MenuBarController {
             )?.withSymbolConfiguration(configuration)
             statusItem.button?.image?.isTemplate = false
         } else {
-            statusItem.button?.image = Self.waveformImage()
+            statusItem.button?.image = Self.regardingWorkImage()
             statusItem.button?.image?.isTemplate = true
         }
     }
@@ -131,21 +133,24 @@ final class MenuBarController {
         transcriptionLabel.isHidden = text == nil
     }
 
-    // Code-native brand asset: a simple local-audio waveform.
-    private static let waveformSVG = """
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-    stroke-linecap="round">
-    <path d="M3 12h2m2-4v8m3-11v14m3-10v6m3-8v10m3-5h2"/>
+    // Code-native monochrome monogram. This intentionally differs from the
+    // waveform used by RegardingWork Dictate so both apps remain recognizable
+    // when they are running together.
+    private static let regardingWorkSVG = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="26" height="18"
+    viewBox="0 0 26 18" fill="none" stroke="currentColor" stroke-width="1.7"
+    stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 15V3.5h4.2c2.5 0 4 1.3 4 3.4s-1.5 3.4-4 3.4H2.5
+    M7 10.3 11 15
+    M13 3.5 15.2 15l3.1-7.5 3.1 7.5 2.1-11.5"/>
     </svg>
     """
 
-    private static func waveformImage() -> NSImage? {
-        guard let data = waveformSVG.data(using: .utf8),
+    private static func regardingWorkImage() -> NSImage? {
+        guard let data = regardingWorkSVG.data(using: .utf8),
               let image = NSImage(data: data)
         else { return nil }
-        // Menu-bar status icons are nominally 18pt tall; size the SVG to match.
-        image.size = NSSize(width: 16, height: 16)
+        image.size = NSSize(width: 24, height: 16)
         return image
     }
 

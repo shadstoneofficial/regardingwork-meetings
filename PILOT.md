@@ -21,7 +21,7 @@ The app opens a visible **Welcome & Setup** window on first launch. Use it to:
 - open the local recordings folder; and
 - start a short test recording.
 
-Closing setup leaves the waveform icon in the menu bar. Reopen setup from that
+Closing setup leaves the **RW** icon in the menu bar. Reopen setup from that
 menu or by opening the app again. If automatic setup display was disabled, the
 menu command remains available.
 

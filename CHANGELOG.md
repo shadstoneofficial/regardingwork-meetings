@@ -4,6 +4,8 @@
 
 - Added a Welcome & Setup window that appears by default and remains accessible
   from the menu bar or by reopening the running app.
+- Replaced the generic waveform menu-bar icon with a distinct monochrome
+  **RW** monogram so Meetings is easy to distinguish from Dictate.
 - Added microphone permission status/request, System Audio settings guidance,
   on-device model preparation, recordings-folder access, consent/privacy
   guidance, and a Start Test Recording action.

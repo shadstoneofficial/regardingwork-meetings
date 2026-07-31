@@ -207,7 +207,7 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         label(
             "Record your microphone and Mac audio as separate local tracks, then create "
                 + "a transcript on this Mac. Complete these three setup steps, run a short "
-                + "test, and use the waveform icon in the menu bar for future recordings.",
+                + "test, and use the RW icon in the menu bar for future recordings.",
             size: 15,
             color: .labelColor
         )
