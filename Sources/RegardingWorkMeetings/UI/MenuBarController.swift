@@ -7,6 +7,8 @@ import AppKit
 final class MenuBarController {
     private let statusItem: NSStatusItem
     private let stateLabel: NSMenuItem
+    private let healthLabel: NSMenuItem
+    private let recoveryLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
     private let toggleItem: NSMenuItem
 
@@ -23,6 +25,16 @@ final class MenuBarController {
         stateLabel = NSMenuItem(title: "idle", action: nil, keyEquivalent: "")
         stateLabel.isEnabled = false
         menu.addItem(stateLabel)
+
+        healthLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        healthLabel.isEnabled = false
+        healthLabel.isHidden = true
+        menu.addItem(healthLabel)
+
+        recoveryLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        recoveryLabel.isEnabled = false
+        recoveryLabel.isHidden = true
+        menu.addItem(recoveryLabel)
 
         transcriptionLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         transcriptionLabel.isEnabled = false
@@ -48,7 +60,7 @@ final class MenuBarController {
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
-            title: "Quit quill",
+            title: "Quit \(AppIdentity.productName)",
             action: #selector(quitClicked),
             keyEquivalent: "q"
         )
@@ -61,7 +73,7 @@ final class MenuBarController {
         statusItem.menu = menu
 
         if let button = statusItem.button {
-            let image = Self.featherImage()
+            let image = Self.waveformImage()
             image?.isTemplate = true
             button.image = image
             button.imagePosition = .imageLeft
@@ -75,7 +87,32 @@ final class MenuBarController {
     func update(recording: Bool, elapsed: String?) {
         stateLabel.title = recording ? "● recording · \(elapsed ?? "0:00")" : "idle"
         toggleItem.title = recording ? "Stop recording" : "Start recording"
-        statusItem.button?.contentTintColor = recording ? .systemRed : nil
+        if !recording { healthLabel.isHidden = true }
+        if recording {
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
+            statusItem.button?.image = NSImage(
+                systemSymbolName: "record.circle.fill",
+                accessibilityDescription: "Recording"
+            )?.withSymbolConfiguration(configuration)
+            statusItem.button?.image?.isTemplate = false
+        } else {
+            statusItem.button?.image = Self.waveformImage()
+            statusItem.button?.image?.isTemplate = true
+        }
+    }
+
+    func updateHealth(_ health: [String: TrackHealth]) {
+        guard let mic = health["mic"], let system = health["system"] else {
+            healthLabel.isHidden = true
+            return
+        }
+        healthLabel.title = "mic \(mic.menuText) · system \(system.menuText)"
+        healthLabel.isHidden = false
+    }
+
+    func updateRecovery(_ text: String?) {
+        recoveryLabel.title = text.map { "recovery: \($0)" } ?? ""
+        recoveryLabel.isHidden = text == nil
     }
 
     /// Show transcription progress/failure as a second status line in the
@@ -86,21 +123,17 @@ final class MenuBarController {
         transcriptionLabel.isHidden = text == nil
     }
 
-    // Inlined Lucide feather SVG. Keeping it in source means the executable
-    // has no separate resource bundle to install alongside it — true
-    // single-binary.
-    private static let featherSVG = """
-    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" \
-    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" \
-    stroke-linecap="round" stroke-linejoin="round">\
-    <path d="M12.67 19a2 2 0 0 0 1.416-.588l6.154-6.172a6 6 0 0 0-8.49-8.49L5.586 9.914A2 2 0 0 0 5 11.328V18a1 1 0 0 0 1 1z"/>\
-    <path d="M16 8 2 22"/>\
-    <path d="M17.5 15H9"/>\
+    // Code-native brand asset: a simple local-audio waveform.
+    private static let waveformSVG = """
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+    stroke-linecap="round">
+    <path d="M3 12h2m2-4v8m3-11v14m3-10v6m3-8v10m3-5h2"/>
     </svg>
     """
 
-    private static func featherImage() -> NSImage? {
-        guard let data = featherSVG.data(using: .utf8),
+    private static func waveformImage() -> NSImage? {
+        guard let data = waveformSVG.data(using: .utf8),
               let image = NSImage(data: data)
         else { return nil }
         // Menu-bar status icons are nominally 18pt tall; size the SVG to match.

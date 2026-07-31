@@ -3,10 +3,10 @@ import ArgumentParser
 import Foundation
 
 @main
-struct Quill: ParsableCommand {
+struct RegardingWorkMeetings: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "quill",
-        abstract: "Local meeting recorder + transcriber. Records mic and system audio as two tracks, then transcribes on-device.",
+        commandName: AppIdentity.executableName,
+        abstract: "\(AppIdentity.productName): local two-track meeting recording and on-device transcription.",
         subcommands: [Run.self, Doctor.self, Install.self],
         defaultSubcommand: Run.self
     )
@@ -54,7 +54,7 @@ struct Run: ParsableCommand {
         signal(SIGINT, SIG_IGN)
 
         FileHandle.standardError.write(Data(
-            "quill up · recordings → \(root.path) · ^C to quit\n".utf8
+            "\(AppIdentity.productName) ready · recordings → \(root.path) · ^C to quit\n".utf8
         ))
         app.run()
     }
@@ -83,6 +83,7 @@ final class AppController {
     private let transcription = TranscriptionCoordinator()
     private var session: RecordingSession?
     private var ticker: Timer?
+    private var lastHealth: [String: TrackHealthState] = [:]
 
     init(root: URL) {
         self.root = root
@@ -90,6 +91,22 @@ final class AppController {
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
+
+        let recovery = SessionRecovery.discover(root: root)
+        if !recovery.recovered.isEmpty {
+            menuBar.updateRecovery(
+                "recovered \(recovery.recovered.count) interrupted session(s)"
+            )
+            notifyUser(
+                title: "\(AppIdentity.productName) — recovery complete",
+                body: "Recovered: \(recovery.recovered.joined(separator: ", "))"
+            )
+        } else if !recovery.warnings.isEmpty {
+            menuBar.updateRecovery("recovery needs attention")
+        }
+        for warning in recovery.warnings {
+            FileHandle.standardError.write(Data("recovery warning: \(warning)\n".utf8))
+        }
 
         Task { [transcription, root] in
             await transcription.setStatusHandler { status in
@@ -120,14 +137,16 @@ final class AppController {
             let newSession = try RecordingSession(root: root)
             try newSession.start()
             session = newSession
+            lastHealth = [:]
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "quill — recording failed", body: "\(error)")
+            notifyUser(title: "\(AppIdentity.productName) — recording failed", body: "\(error)")
             return
         }
 
         menuBar.update(recording: true, elapsed: "0:00")
+        updateHealth()
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -141,6 +160,7 @@ final class AppController {
             "○ stopped · \(elapsed) · \(session.dir.path)\n".utf8
         ))
         self.session = nil
+        lastHealth = [:]
         ticker?.invalidate()
         ticker = nil
         menuBar.update(recording: false, elapsed: nil)
@@ -168,6 +188,24 @@ final class AppController {
             recording: true,
             elapsed: Self.format(Date().timeIntervalSince(session.startedAt))
         )
+        updateHealth()
+    }
+
+    private func updateHealth() {
+        guard let session else { return }
+        let health = session.health()
+        menuBar.updateHealth(health)
+        for track in ["mic", "system"] {
+            guard let current = health[track] else { continue }
+            let previous = lastHealth[track]
+            if current.needsAttention, previous != current.state {
+                notifyUser(
+                    title: "\(AppIdentity.productName) — \(track) \(current.state.rawValue)",
+                    body: "\(current.detail). The recording may be incomplete."
+                )
+            }
+            lastHealth[track] = current.state
+        }
     }
 
     private func openFolder() {

@@ -1,11 +1,12 @@
 import AVFoundation
 import Foundation
+import os.lock
 
 /// Records the default input device to a file via AVAudioEngine, encoding AAC
 /// mono. Buffers stream straight to disk — nothing is held in memory, so
 /// session length is unbounded.
 ///
-/// With voice processing on (the default), Apple's echo canceller subtracts
+/// With voice processing on (opt-in), Apple's echo canceller subtracts
 /// speaker playback from the mic so the system track doesn't bleed into the
 /// mic track. VoiceProcessingIO is a duplex unit, not an input effect: it
 /// needs a rendered output path and one explicit mono client format on both
@@ -28,12 +29,32 @@ final class MicRecorder: @unchecked Sendable {
     }
 
     private var engine = AVAudioEngine()
-    private var file: AVAudioFile?
     private var url: URL?
     private(set) var isRecording = false
-    /// Wall-clock time of the first captured buffer — the track's true start,
-    /// used to offset-align the two tracks' transcript timestamps.
-    private(set) var firstBufferAt: Date?
+
+    private struct LockedState {
+        var file: AVAudioFile?
+        var firstBufferAt: Date?
+        var lastBufferAt: Date?
+        var lastSignalAt: Date?
+        var failure: String?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: LockedState())
+
+    var firstBufferAt: Date? { state.withLock { $0.firstBufferAt } }
+
+    func snapshot() -> RecorderSnapshot {
+        let recording = isRecording
+        return state.withLock {
+            RecorderSnapshot(
+                isRecording: recording,
+                firstBufferAt: $0.firstBufferAt,
+                lastBufferAt: $0.lastBufferAt,
+                lastSignalAt: $0.lastSignalAt,
+                failure: $0.failure
+            )
+        }
+    }
 
     // Liveness check state (voice-processing path only). Written from the tap
     // callback, read on main when deciding to fall back.
@@ -56,7 +77,8 @@ final class MicRecorder: @unchecked Sendable {
         isRecording = false
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        file = nil
+        state.withLock { $0.file = nil }
+        if let url { try? SecureStorage.protectFile(url) }
     }
 
     // MARK: -
@@ -106,12 +128,17 @@ final class MicRecorder: @unchecked Sendable {
             AVNumberOfChannelsKey: 1,
         ]
         do {
-            file = try AVAudioFile(
+            let output = try AVAudioFile(
                 forWriting: url!,
                 settings: settings,
                 commonFormat: monoFormat.commonFormat,
                 interleaved: monoFormat.isInterleaved
             )
+            try SecureStorage.protectFile(url!)
+            state.withLock {
+                $0.file = output
+                $0.failure = nil
+            }
         } catch {
             throw RecorderError.fileCreationFailed(error)
         }
@@ -135,7 +162,7 @@ final class MicRecorder: @unchecked Sendable {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            file = nil
+            state.withLock { $0.file = nil }
             throw RecorderError.engineStartFailed(error)
         }
 
@@ -152,8 +179,7 @@ final class MicRecorder: @unchecked Sendable {
     private func installVoiceTap(on input: AVAudioInputNode, format: AVAudioFormat) {
         let checkFrames = Int(format.sampleRate)
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            guard let self else { return }
 
             if !self.livenessSettled {
                 let frames = Int(buffer.frameLength)
@@ -172,11 +198,7 @@ final class MicRecorder: @unchecked Sendable {
                 }
             }
 
-            do {
-                try file.write(from: buffer)
-            } catch {
-                FileHandle.standardError.write(Data("mic track write failed: \(error)\n".utf8))
-            }
+            self.write(buffer)
         }
     }
 
@@ -191,19 +213,50 @@ final class MicRecorder: @unchecked Sendable {
             throw RecorderError.formatUnsupported(inputFormat)
         }
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            guard let self else { return }
             guard let mono = AVAudioPCMBuffer(
                 pcmFormat: monoFormat,
                 frameCapacity: buffer.frameCapacity
             ) else { return }
             do {
                 try converter.convert(to: mono, from: buffer)
-                try file.write(from: mono)
+                self.write(mono)
             } catch {
-                FileHandle.standardError.write(Data("mic track write failed: \(error)\n".utf8))
+                self.recordFailure("mic conversion failed: \(error)")
             }
         }
+    }
+
+    private func write(_ buffer: AVAudioPCMBuffer) {
+        let now = Date()
+        let hasSignal = Self.hasSignal(buffer)
+        guard let file = state.withLock({ $0.file }) else { return }
+        do {
+            try file.write(from: buffer)
+            state.withLock {
+                if $0.firstBufferAt == nil { $0.firstBufferAt = now }
+                $0.lastBufferAt = now
+                if hasSignal { $0.lastSignalAt = now }
+            }
+        } catch {
+            recordFailure("mic track write failed: \(error)")
+        }
+    }
+
+    private func recordFailure(_ message: String) {
+        state.withLock { $0.failure = message }
+        FileHandle.standardError.write(Data("\(message)\n".utf8))
+    }
+
+    private static func hasSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
+        guard let channels = buffer.floatChannelData else { return false }
+        let frames = Int(buffer.frameLength)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            for frame in 0..<frames where abs(channels[channel][frame]) > 0.0001 {
+                return true
+            }
+        }
+        return false
     }
 
     /// The voice-processing route delivered a full second of digital silence:
@@ -216,8 +269,12 @@ final class MicRecorder: @unchecked Sendable {
         ))
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        file = nil
-        firstBufferAt = nil
+        state.withLock {
+            $0.file = nil
+            $0.firstBufferAt = nil
+            $0.lastBufferAt = nil
+            $0.lastSignalAt = nil
+        }
         if let url {
             try? FileManager.default.removeItem(at: url)
         }
@@ -227,7 +284,7 @@ final class MicRecorder: @unchecked Sendable {
             FileHandle.standardError.write(Data(
                 "mic raw fallback failed: \(error) — session continues without mic track\n".utf8
             ))
-            file = nil
+            recordFailure("mic raw fallback failed: \(error)")
         }
     }
 }

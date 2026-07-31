@@ -1,2 +1,21 @@
-.build/
 .DS_Store
+.build/
+dist/
+*.dmg
+*.zip
+*.p12
+*.cer
+*.mobileprovision
+notarization-*.json
+
+# Local recordings, transcripts, models, and machine configuration
+RegardingWork/
+Recordings/
+**/mic.caf
+**/system.caf
+**/transcript.json
+**/transcript.md
+**/recording.json
+**/recording.recovered.json
+.env
+config.local.json
