@@ -82,4 +82,20 @@ struct ConfigTests {
                 == ["--label", "team; echo unsafe", "/tmp/session with spaces"]
         )
     }
+
+    @Test("relative hook executable is disabled")
+    func relativeHookIsDisabled() throws {
+        let manager = FileManager.default
+        let temporary = manager.temporaryDirectory
+            .appendingPathComponent("rwm-hook-\(UUID().uuidString)", isDirectory: true)
+        try manager.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: temporary) }
+        let url = temporary.appendingPathComponent("config.json")
+        try Data(#"{"on_stop":["relative-hook","--unsafe"]}"#.utf8).write(to: url)
+        let config = ConfigLoader.load(
+            from: url,
+            home: URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        )
+        #expect(config.onStop == nil)
+    }
 }

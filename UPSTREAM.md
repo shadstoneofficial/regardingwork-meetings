@@ -38,6 +38,20 @@ No cloud transcription PR was adopted. No upstream PR was merged wholesale;
 the local implementation follows this repository's privacy and preservation
 guardrails.
 
+## Migration from an upstream development install
+
+No data or configuration is moved automatically. That avoids overwriting,
+merging, or deleting existing recordings without an explicit user choice.
+
+- The old `~/.config/quill/config.json` is not read. Review it manually and
+  create `~/.config/regardingwork-meetings/config.json`.
+- The old `~/Recordings` folder is not renamed or deleted. Copy selected
+  sessions into `~/RegardingWork/Meetings` only after backing them up.
+- Remove an old `com.digimata.quill` LaunchAgent separately before enabling
+  `com.regardingwork.meetings`; never run both against the same recording root.
+- Permission grants for an upstream binary do not transfer to the
+  `com.regardingwork.meetings` app identity.
+
 ## Updating
 
 ```sh

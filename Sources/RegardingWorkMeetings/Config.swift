@@ -65,10 +65,12 @@ enum ConfigLoader {
             )
             return nil
         }
-        return HookCommand(
-            executable: expandPath(executable, home: home),
-            arguments: Array(parts.dropFirst())
-        )
+        let expanded = expandPath(executable, home: home)
+        guard expanded.hasPrefix("/") else {
+            warn("warning: \(source.path) on_stop executable must be an absolute path")
+            return nil
+        }
+        return HookCommand(executable: expanded, arguments: Array(parts.dropFirst()))
     }
 
     private static func expand(_ path: String, home: URL) -> URL {
