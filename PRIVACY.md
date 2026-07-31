@@ -13,17 +13,24 @@ synchronization, summarization, cloud transcription, or external AI processing.
 - macOS displays its system recording indicator while capture is active.
 - The menu-bar icon becomes an explicit red recording symbol and the menu shows
   elapsed time plus each track's health.
+- After recording, a blue menu-bar symbol remains visible while local
+  transcription is active; an orange warning symbol indicates failure.
 
 The application cannot guarantee that unrelated audio is absent. Use Focus,
 close unrelated media, and run the pilot checks before important meetings.
 
 ## Storage and permissions
 
-The default root is `~/RegardingWork/Meetings`. Session directories are mode
+The default root is `~/RegardingWork Meetings`. Session directories are mode
 `0700`; audio, transcripts, metadata, manifests, and session logs are mode
 `0600`. LaunchAgent logs live under
 `~/Library/Application Support/RegardingWork Meetings/Logs` with user-only
 permissions. Transcript text is never written to general application logs.
+
+The former default `~/RegardingWork/Meetings` is preserved. When using the new
+default, the app scans that legacy location only to recover interrupted
+recordings and retry incomplete local transcriptions; it does not automatically
+move, overwrite, or delete those sessions.
 
 The Parakeet model is managed locally by FluidAudio/Core ML. A network
 connection is needed for its initial download; transcription after preparation

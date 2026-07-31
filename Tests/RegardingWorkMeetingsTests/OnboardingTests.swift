@@ -22,4 +22,36 @@ struct OnboardingTests {
         OnboardingPreferences.markRecordingStarted(defaults: defaults)
         #expect(OnboardingPreferences.hasStartedRecording(defaults: defaults))
     }
+
+    @Test("recording takes icon precedence over local transcription")
+    func menuBarActivityPrecedence() {
+        #expect(
+            MenuBarActivity.resolve(
+                recording: false,
+                transcriptionVisible: false,
+                transcriptionFailed: false
+            ) == .idle
+        )
+        #expect(
+            MenuBarActivity.resolve(
+                recording: false,
+                transcriptionVisible: true,
+                transcriptionFailed: false
+            ) == .transcribing
+        )
+        #expect(
+            MenuBarActivity.resolve(
+                recording: false,
+                transcriptionVisible: true,
+                transcriptionFailed: true
+            ) == .transcriptionFailed
+        )
+        #expect(
+            MenuBarActivity.resolve(
+                recording: true,
+                transcriptionVisible: true,
+                transcriptionFailed: true
+            ) == .recording
+        )
+    }
 }

@@ -38,8 +38,9 @@ in [PILOT.md](PILOT.md). No release workflow publishes artifacts.
    **RW** menu-bar icon.
 4. Confirm the menu shows `mic ✓ · system ✓` while someone speaks on each
    source. `silent`, `stalled`, or `failed` is a real warning.
-5. Choose **Stop recording**. Parakeet transcribes locally in a serial queue.
-6. Open `~/RegardingWork/Meetings/<yyyy.MM.dd-HHmm>/`.
+5. Choose **Stop recording**. The menu-bar icon becomes a blue processing
+   symbol while Parakeet transcribes locally in a serial queue.
+6. Open `~/RegardingWork Meetings/<yyyy.MM.dd-HHmm>/`.
 
 Closing Welcome & Setup leaves the **RW** recorder icon available in the menu bar. Reopen
 the window at any time by opening the app again or choosing
@@ -93,7 +94,7 @@ Optional configuration lives at:
 
 ```json
 {
-  "recordings_dir": "~/RegardingWork/Meetings",
+  "recordings_dir": "~/RegardingWork Meetings",
   "transcription": {"enabled": true, "engine": "parakeet"},
   "mic_voice_processing": false,
   "on_stop": ["/absolute/path/to/trusted-hook", "--local-only"]
@@ -101,7 +102,10 @@ Optional configuration lives at:
 ```
 
 Recording-root precedence is `--out`, then configuration, then
-`~/RegardingWork/Meetings`. `on_stop` is disabled unless an argv array is
+`~/RegardingWork Meetings`. Builds that used the former
+`~/RegardingWork/Meetings` default are not moved or deleted; the app still
+discovers unfinished sessions there and retries their transcription after
+relaunch. `on_stop` is disabled unless an argv array is
 explicitly configured. It is executed directly, without a shell, and receives
 the session directory as its final argument. Treat it as an advanced,
 trusted-user feature.

@@ -6,6 +6,11 @@
   from the menu bar or by reopening the running app.
 - Replaced the generic waveform menu-bar icon with a distinct monochrome
   **RW** monogram so Meetings is easy to distinguish from Dictate.
+- Added blue local-transcription and orange transcription-failure menu-bar
+  states; active recording remains the highest-priority red state.
+- Changed the default recording root to `~/RegardingWork Meetings`. The former
+  `~/RegardingWork/Meetings` default is preserved and scanned for interrupted
+  or unfinished sessions without automatic moves or deletion.
 - Added microphone permission status/request, System Audio settings guidance,
   on-device model preparation, recordings-folder access, consent/privacy
   guidance, and a Start Test Recording action.

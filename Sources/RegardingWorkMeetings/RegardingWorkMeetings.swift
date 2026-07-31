@@ -107,29 +107,38 @@ final class AppController {
             DispatchQueue.main.async { [weak self] in self?.showSetup() }
         }
 
-        let recovery = SessionRecovery.discover(root: root)
-        if !recovery.recovered.isEmpty {
+        let discoveryRoots = AppIdentity.recordingRootsForDiscovery(currentRoot: root)
+        let recoveryReports = discoveryRoots.map { discoveryRoot in
+            (root: discoveryRoot, report: SessionRecovery.discover(root: discoveryRoot))
+        }
+        let recovered = recoveryReports.flatMap(\.report.recovered)
+        let recoveryWarnings = recoveryReports.flatMap { entry in
+            entry.report.warnings.map { "\(entry.root.path): \($0)" }
+        }
+        if !recovered.isEmpty {
             menuBar.updateRecovery(
-                "recovered \(recovery.recovered.count) interrupted session(s)"
+                "recovered \(recovered.count) interrupted session(s)"
             )
             notifyUser(
                 title: "\(AppIdentity.productName) — recovery complete",
-                body: "Recovered: \(recovery.recovered.joined(separator: ", "))"
+                body: "Recovered: \(recovered.joined(separator: ", "))"
             )
-        } else if !recovery.warnings.isEmpty {
+        } else if !recoveryWarnings.isEmpty {
             menuBar.updateRecovery("recovery needs attention")
         }
-        for warning in recovery.warnings {
+        for warning in recoveryWarnings {
             FileHandle.standardError.write(Data("recovery warning: \(warning)\n".utf8))
         }
 
-        Task { [transcription, root] in
+        Task { [transcription, discoveryRoots] in
             await transcription.setStatusHandler { status in
                 Task { @MainActor [weak self] in
                     self?.showTranscription(status)
                 }
             }
-            await transcription.resumePending(root: root)
+            for discoveryRoot in discoveryRoots {
+                await transcription.resumePending(root: discoveryRoot)
+            }
         }
     }
 
@@ -196,7 +205,7 @@ final class AppController {
                 queued > 0 ? "transcribing \(name) · \(queued) queued" : "transcribing \(name)"
             )
         case .failed(let name):
-            menuBar.updateTranscription("transcription failed · \(name)")
+            menuBar.updateTranscription("transcription failed · \(name)", failed: true)
         }
     }
 

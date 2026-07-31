@@ -12,7 +12,7 @@ struct ConfigTests {
         #expect(AppIdentity.executableName == "regardingwork-meetings")
         #expect(
             AppIdentity.recordingsRoot(home: home).path
-                == "/Users/tester/RegardingWork/Meetings"
+                == "/Users/tester/RegardingWork Meetings"
         )
         #expect(
             AppIdentity.configurationURL(home: home).path
@@ -63,7 +63,29 @@ struct ConfigTests {
         )
         #expect(
             ConfigLoader.resolveRoot(cliOverride: nil, config: AppConfig(), home: home).path
-                == "/Users/tester/RegardingWork/Meetings"
+                == "/Users/tester/RegardingWork Meetings"
+        )
+    }
+
+    @Test("default storage discovers the legacy root without changing custom roots")
+    func legacyDiscovery() {
+        let home = URL(fileURLWithPath: "/Users/tester", isDirectory: true)
+        #expect(
+            AppIdentity.recordingRootsForDiscovery(
+                currentRoot: AppIdentity.recordingsRoot(home: home),
+                home: home
+            ).map(\.path)
+                == [
+                    "/Users/tester/RegardingWork Meetings",
+                    "/Users/tester/RegardingWork/Meetings",
+                ]
+        )
+        #expect(
+            AppIdentity.recordingRootsForDiscovery(
+                currentRoot: URL(fileURLWithPath: "/Volumes/Private/Meetings"),
+                home: home
+            ).map(\.path)
+                == ["/Volumes/Private/Meetings"]
         )
     }
 

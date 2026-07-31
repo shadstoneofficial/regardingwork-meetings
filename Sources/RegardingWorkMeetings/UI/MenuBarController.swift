@@ -1,5 +1,23 @@
 import AppKit
 
+enum MenuBarActivity: Equatable {
+    case idle
+    case transcribing
+    case transcriptionFailed
+    case recording
+
+    static func resolve(
+        recording: Bool,
+        transcriptionVisible: Bool,
+        transcriptionFailed: Bool
+    ) -> Self {
+        if recording { return .recording }
+        if transcriptionFailed { return .transcriptionFailed }
+        if transcriptionVisible { return .transcribing }
+        return .idle
+    }
+}
+
 /// Status bar item in the top-right of the menu bar. Shows recording state at
 /// a glance and keeps recording controls available after the setup window is
 /// closed.
@@ -11,6 +29,8 @@ final class MenuBarController {
     private let recoveryLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
     private let toggleItem: NSMenuItem
+    private var recording = false
+    private var transcriptionFailed = false
 
     var onToggle: (() -> Void)?
     var onShowSetup: (() -> Void)?
@@ -90,24 +110,62 @@ final class MenuBarController {
         }
     }
 
-    /// Reflect recording state in the icon tint and menu item titles. The
-    /// menu bar shows only the feather (red while recording); the elapsed
-    /// counter lives in the menu's state label. Call once a second while
-    /// recording.
+    /// Reflect recording state in the icon tint and menu item titles. Recording
+    /// takes visual precedence if a previous session is still transcribing.
     func update(recording: Bool, elapsed: String?) {
-        stateLabel.title = recording ? "● recording · \(elapsed ?? "0:00")" : "idle"
+        self.recording = recording
+        stateLabel.title = recording
+            ? "● recording · \(elapsed ?? "0:00")"
+            : idleStateTitle()
         toggleItem.title = recording ? "Stop recording" : "Start recording"
         if !recording { healthLabel.isHidden = true }
-        if recording {
+        updateStatusIcon()
+    }
+
+    private func updateStatusIcon() {
+        let activity = MenuBarActivity.resolve(
+            recording: recording,
+            transcriptionVisible: !transcriptionLabel.isHidden,
+            transcriptionFailed: transcriptionFailed
+        )
+        let button = statusItem.button
+        switch activity {
+        case .recording:
             let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemRed])
-            statusItem.button?.image = NSImage(
+            button?.image = NSImage(
                 systemSymbolName: "record.circle.fill",
                 accessibilityDescription: "Recording"
             )?.withSymbolConfiguration(configuration)
-            statusItem.button?.image?.isTemplate = false
-        } else {
-            statusItem.button?.image = Self.regardingWorkImage()
-            statusItem.button?.image?.isTemplate = true
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — recording"
+            button?.setAccessibilityLabel("\(AppIdentity.productName) — recording")
+        case .transcribing:
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemBlue])
+            button?.image = NSImage(
+                systemSymbolName: "ellipsis.circle.fill",
+                accessibilityDescription: "Transcribing locally"
+            )?.withSymbolConfiguration(configuration)
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — transcribing locally"
+            button?.setAccessibilityLabel(
+                "\(AppIdentity.productName) — transcribing locally"
+            )
+        case .transcriptionFailed:
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
+            button?.image = NSImage(
+                systemSymbolName: "exclamationmark.triangle.fill",
+                accessibilityDescription: "Transcription needs attention"
+            )?.withSymbolConfiguration(configuration)
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — transcription needs attention"
+            button?.setAccessibilityLabel(
+                "\(AppIdentity.productName) — transcription needs attention"
+            )
+        case .idle:
+            button?.image = Self.regardingWorkImage()
+            button?.image?.isTemplate = true
+            button?.toolTip = AppIdentity.productName
+            button?.setAccessibilityLabel(AppIdentity.productName)
         }
     }
 
@@ -128,9 +186,20 @@ final class MenuBarController {
     /// Show transcription progress/failure as a second status line in the
     /// menu; nil hides it. Independent of recording state — a new recording
     /// can run while the last one transcribes.
-    func updateTranscription(_ text: String?) {
+    func updateTranscription(_ text: String?, failed: Bool = false) {
+        transcriptionFailed = text != nil && failed
         transcriptionLabel.title = text ?? ""
         transcriptionLabel.isHidden = text == nil
+        if !recording {
+            stateLabel.title = idleStateTitle()
+        }
+        updateStatusIcon()
+    }
+
+    private func idleStateTitle() -> String {
+        if transcriptionFailed { return "transcription needs attention" }
+        if !transcriptionLabel.isHidden { return "transcribing locally…" }
+        return "idle"
     }
 
     // Code-native monochrome monogram. This intentionally differs from the

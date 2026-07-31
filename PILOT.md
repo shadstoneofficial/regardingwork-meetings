@@ -97,6 +97,16 @@ warning text, ordering, Markdown rendering, canonical JSON preservation, and
 that `transcribe.log` contains no transcript text. Parakeet v2 is English-only;
 non-English quality is unsupported in this pilot.
 
+While transcription is active, confirm the menu-bar icon is blue and the menu
+says **transcribing locally…**. A red record icon takes precedence if another
+recording starts. A transcription failure uses an orange warning icon.
+
+Closing the MacBook lid normally suspends processing and allows it to continue
+after wake. Quitting, restarting, losing power, or shutting down interrupts the
+current transcription. On the next launch, a session with `meta.json` but no
+`transcript.json` is queued again from the beginning; original CAF audio is
+preserved. Wait for transcription to finish before shutdown when practical.
+
 ## Interrupted-session recovery
 
 Use a disposable synthetic session. Force-quit the process while recording,
@@ -142,7 +152,8 @@ Then quit the app and move it to Trash. Roll back by installing a previously
 verified signed build; do not reuse incompatible config without review.
 
 Recordings are intentionally not removed by uninstall. To remove local data,
-move `~/RegardingWork/Meetings` and
+move `~/RegardingWork Meetings`,
+the former `~/RegardingWork/Meetings` folder if it exists, and
 `~/Library/Application Support/RegardingWork Meetings` to Trash, review them,
 then empty Trash. Remove backups and synced copies separately. FluidAudio model
 caches are external to the app and must be located/reviewed before deletion.
