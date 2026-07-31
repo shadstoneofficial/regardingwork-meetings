@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>RegardingWork Meetings</string>
+    <key>CFBundleExecutable</key>
+    <string>regardingwork-meetings</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.regardingwork.meetings</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>RegardingWork Meetings</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@BUILD_NUMBER@</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>RegardingWork Meetings records your microphone only after you choose Start Recording, so it can create a local meeting recording and transcript. Audio stays on this Mac.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>RegardingWork Meetings records all audio played by this Mac only after you choose Start Recording, including meeting participants, notifications, and unrelated apps. Audio stays on this Mac.</string>
+</dict>
+</plist>
