@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.regardingwork.meetings</string>
+    <key>CFBundleDisplayName</key>
+    <string>RegardingWork Meetings</string>
+    <key>CFBundleName</key>
+    <string>RegardingWork Meetings</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>RegardingWork Meetings records your microphone only after you choose Start Recording, so it can create a local meeting recording and transcript. Audio stays on this Mac.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>RegardingWork Meetings records all audio played by this Mac only after you choose Start Recording, including meeting participants, notifications, and unrelated apps. Audio stays on this Mac.</string>
+</dict>
+</plist>

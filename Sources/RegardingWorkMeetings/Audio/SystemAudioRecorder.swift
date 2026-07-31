@@ -1,13 +1,14 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import os.lock
 
 /// Records all system audio output to a file via a Core Audio process tap
 /// (macOS 14.2+). No virtual device, no kernel extension — the tap mixes every
 /// process's output to stereo and hands us buffers through a private aggregate
 /// device. First use triggers the one-time "System Audio Recording" TCC prompt
 /// and lights the purple recording indicator while active.
-final class SystemAudioRecorder {
+final class SystemAudioRecorder: @unchecked Sendable {
     enum RecorderError: Error, CustomStringConvertible {
         case tapCreationFailed(OSStatus)
         case tapFormatUnreadable(OSStatus)
@@ -32,12 +33,32 @@ final class SystemAudioRecorder {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private var file: AVAudioFile?
-    private let queue = DispatchQueue(label: "com.digimata.quill.system-tap")
+    private let queue = DispatchQueue(label: "\(AppIdentity.bundleIdentifier).system-tap")
     private(set) var isRecording = false
-    /// Wall-clock time of the first captured buffer — the track's true start,
-    /// used to offset-align the two tracks' transcript timestamps.
-    private(set) var firstBufferAt: Date?
+
+    private struct LockedState {
+        var file: AVAudioFile?
+        var firstBufferAt: Date?
+        var lastBufferAt: Date?
+        var lastSignalAt: Date?
+        var failure: String?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: LockedState())
+
+    var firstBufferAt: Date? { state.withLock { $0.firstBufferAt } }
+
+    func snapshot() -> RecorderSnapshot {
+        let recording = isRecording
+        return state.withLock {
+            RecorderSnapshot(
+                isRecording: recording,
+                firstBufferAt: $0.firstBufferAt,
+                lastBufferAt: $0.lastBufferAt,
+                lastSignalAt: $0.lastSignalAt,
+                failure: $0.failure
+            )
+        }
+    }
 
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
     /// extension — CAF needs no finalization pass, so a crash mid-meeting
@@ -46,7 +67,7 @@ final class SystemAudioRecorder {
         guard !isRecording else { return }
 
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
-        description.name = "quill system tap"
+        description.name = "\(AppIdentity.productName) system tap"
         description.isPrivate = true
         description.muteBehavior = .unmuted
 
@@ -58,7 +79,9 @@ final class SystemAudioRecorder {
         do {
             let format = try tapStreamFormat()
             try createAggregateDevice(tapUUID: description.uuid)
-            file = try makeFile(url: url, format: format)
+            let file = try makeFile(url: url, format: format)
+            try SecureStorage.protectFile(url)
+            state.withLock { $0.file = file }
             try installIOProc(format: format)
         } catch {
             cleanup()
@@ -97,7 +120,7 @@ final class SystemAudioRecorder {
 
     private func createAggregateDevice(tapUUID: UUID) throws {
         let desc: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "quill-tap",
+            kAudioAggregateDeviceNameKey: "regardingwork-meetings-tap",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
@@ -137,17 +160,26 @@ final class SystemAudioRecorder {
     private func installIOProc(format: AVAudioFormat) throws {
         var status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
             [weak self] _, inInputData, _, _, _ in
-            guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            guard let self else { return }
             guard let buffer = AVAudioPCMBuffer(
                 pcmFormat: format,
                 bufferListNoCopy: inInputData,
                 deallocator: nil
             ) else { return }
             do {
+                let now = Date()
+                let hasSignal = Self.hasSignal(buffer)
+                guard let file = self.state.withLock({ $0.file }) else { return }
                 try file.write(from: buffer)
+                self.state.withLock {
+                    if $0.firstBufferAt == nil { $0.firstBufferAt = now }
+                    $0.lastBufferAt = now
+                    if hasSignal { $0.lastSignalAt = now }
+                }
             } catch {
-                FileHandle.standardError.write(Data("system track write failed: \(error)\n".utf8))
+                let message = "system track write failed: \(error)"
+                self.state.withLock { $0.failure = message }
+                FileHandle.standardError.write(Data("\(message)\n".utf8))
             }
         }
         guard status == noErr, let procID else { throw RecorderError.ioProcCreationFailed(status) }
@@ -169,6 +201,17 @@ final class SystemAudioRecorder {
             AudioHardwareDestroyProcessTap(tapID)
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
-        file = nil
+        state.withLock { $0.file = nil }
+    }
+
+    private static func hasSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
+        guard let channels = buffer.floatChannelData else { return false }
+        let frames = Int(buffer.frameLength)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            for frame in 0..<frames where abs(channels[channel][frame]) > 0.0001 {
+                return true
+            }
+        }
+        return false
     }
 }

@@ -39,7 +39,7 @@ enum DoctorReport {
             return Check(
                 name: "microphone",
                 status: .fail("denied"),
-                remediation: "System Settings → Privacy & Security → Microphone → enable for quill (or your terminal)"
+                remediation: "System Settings → Privacy & Security → Microphone → enable for \(AppIdentity.productName) (or your terminal for a development build)"
             )
         @unknown default:
             return Check(name: "microphone", status: .fail("unknown state"), remediation: nil)
@@ -58,7 +58,7 @@ enum DoctorReport {
 
     static func checkRecordingsRoot(_ root: URL) -> Check {
         do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try SecureStorage.createDirectory(root)
         } catch {
             return Check(
                 name: "recordings folder",
