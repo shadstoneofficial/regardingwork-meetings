@@ -1,127 +1,140 @@
-# quill
+# RegardingWork Meetings
 
-A minimal, fully local macOS meeting recorder + transcriber. One menu-bar
-click records your mic and all system audio as two separate tracks; when you
-stop, quill transcribes both on-device and writes a speaker-tagged transcript.
-Nothing ever leaves the machine.
+RegardingWork Meetings is a private, fully local macOS meeting recorder and
+transcriber in the RegardingWork Voice product family. A deliberate menu-bar
+action captures the default microphone and all Mac system audio as separate
+CAF tracks, then runs Parakeet transcription on-device. Audio and transcripts
+stay on the Mac.
 
-Named for the feather. Sibling of [parrot](https://github.com/digimata/parrot), same skeleton: single
-Swift binary, menu-bar tray, no app bundle.
+This application is separate from RegardingWork Dictate.
 
-## Install
+## Requirements
+
+- macOS 15 or later
+- Apple Silicon recommended for transcription performance
+- Microphone and Screen & System Audio Recording permissions
+- Network access only for the one-time FluidAudio/Parakeet model download
+
+## Development build
 
 ```sh
-cd quill
 swift build -c release
-sudo cp .build/release/quill /usr/local/bin/quill
-quill install --launch-at-login   # optional — runs in the background on login
+swift test
+scripts/build-app.sh
+open "dist/RegardingWork Meetings.app"
 ```
 
-**Requires:** macOS 15+ (Core Audio process taps for system audio — no
-virtual device, no kernel extension). Apple Silicon recommended for
-transcription speed.
+The app bundle is ad-hoc signed for development by default. It uses
+`com.regardingwork.meetings`; a Developer ID build must use the signing handoff
+in [PILOT.md](PILOT.md). No release workflow publishes artifacts.
 
-## How to use
+## Use
 
-1. **Run it** (`quill` in a terminal, or the LaunchAgent).
-2. **Click the feather in the menu bar → Start recording.** First use prompts
-   for microphone and System Audio Recording permissions. While recording, the
-   icon turns red with a running elapsed counter, and macOS shows the purple
-   recording indicator.
-3. **Click → Stop recording** when the meeting ends. Transcription starts
-   automatically (the menu shows progress); a notification fires when the
-   transcript is ready.
+1. Launch the app and find its waveform icon in the menu bar.
+2. Choose **Start recording** and approve both macOS permissions.
+3. Confirm the menu shows `mic ✓ · system ✓` while someone speaks on each
+   source. `silent`, `stalled`, or `failed` is a real warning.
+4. Choose **Stop recording**. Parakeet transcribes locally in a serial queue.
+5. Open `~/RegardingWork/Meetings/<yyyy.MM.dd-HHmm>/`.
 
-Each session lands in `~/Recordings/<yyyy.MM.dd-HHmm>/`:
+Each completed session can contain:
 
-| File | Contents |
+| File | Purpose |
 |---|---|
-| `mic.caf` | your side (default input device, AAC) |
-| `system.caf` | everything the Mac played — the other side of the call (AAC) |
-| `meta.json` | start/end timestamps, duration, per-track start offsets |
-| `transcript.json` | canonical transcript — engine provenance + timed, speaker-tagged segments |
-| `transcript.md` | the same transcript rendered for reading |
-| `transcribe.log` | transcription progress/errors for this session |
+| `mic.caf` | Local microphone; transcript source label `me` |
+| `system.caf` | Everything the Mac played; source label `them` |
+| `meta.json` | Timing, source attribution, recovery, and final track health |
+| `transcript.json` | Canonical transcript, including preserved echo candidates |
+| `transcript.md` | Readable transcript with visible warnings |
+| `transcribe.log` | Progress and errors; never transcript text |
 
-Two tracks on purpose: speech models do better on clean single-source audio,
-and mic-vs-system is free two-party diarization — `me` vs `them` with no
-speaker-identification model. CAF on purpose: unlike m4a, it needs no
-finalization pass — if the process dies mid-meeting, everything already
-written is still readable.
+While recording, `recording.json` is updated atomically. A clean stop writes
+`meta.json` and removes it. After interruption, recovery preserves readable
+tracks, writes explicit recovered metadata, and retains the sidecar as
+`recording.recovered.json`. See [RECOVERY.md](RECOVERY.md).
 
-## Transcription
+## Attribution is not diarization
 
-Built in, on-device, automatic. The default engine is **Parakeet TDT 0.6B v2**
-(English) via [FluidAudio](https://github.com/FluidInference/FluidAudio)'s
-Core ML port — roughly 20 seconds per hour of audio on Apple Silicon. Models
-(~600 MB) download once on first transcription; `quill doctor` tells you
-whether they're already cached so you're never downloading after an important
-meeting.
+`me` means the microphone track and `them` means the system-audio track. This
+is two-track source attribution, not identification or diarization of multiple
+remote speakers.
 
-Each track is transcribed separately, shifted by its start offset so both
-share one clock, and merged by timestamp. Jobs run in a serial queue — you can
-start a new recording while the last one transcribes. Unfinished jobs resume
-on next launch (the filesystem is the queue: a session with `meta.json` but no
-`transcript.json` is pending). Failures append to the session's
-`transcribe.log` and never block later jobs.
+Speaker playback can bleed into the microphone. Headphones are the preferred
+setup. High-confidence overlapping duplicates are hidden only from Markdown;
+the canonical JSON marks and retains them, and original audio is never removed.
+Weaker matches stay visible with warnings.
 
-The engine sits behind a small protocol; a Whisper engine (WhisperKit
-large-v3-turbo) is planned as the fallback / re-transcription option.
-
-## Config
-
-Optional, at `~/.config/quill/config.json`:
+Optional Apple voice processing can reduce speaker echo:
 
 ```json
 {
-  "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "parakeet" },
-  "on_stop": "my-hook"
+  "mic_voice_processing": true
 }
 ```
 
-- `recordings_dir` — where sessions land. Resolution order: `--out` flag >
-  config > `~/Recordings`.
-- `transcription.enabled` — set `false` to just record.
-- `mic_voice_processing` — Apple's echo cancellation on the mic (default off).
-  Set `true` when recording meetings through the speakers, so playback doesn't
-  bleed into the mic track and get transcribed twice as "me". The trade: while
-  the voice unit is live, macOS ducks other playback slightly (`.min` ducking
-  is configured, but it can't be zeroed). On headphones there's no echo to
-  cancel, so raw capture is the better default.
-- `on_stop` — shell command spawned with the session directory as its
-  argument, **after the transcript is written** (or right after recording if
-  transcription is disabled). Wire it to whatever comes next: summarization,
-  filing, indexing.
+It is off by default because it can duck playback, alter microphone audio, or
+fail on some routes. The app falls back to raw mic capture if the initial
+voice-processing signal is digitally silent.
+
+## Configuration
+
+Optional configuration lives at:
+
+`~/.config/regardingwork-meetings/config.json`
+
+```json
+{
+  "recordings_dir": "~/RegardingWork/Meetings",
+  "transcription": {"enabled": true, "engine": "parakeet"},
+  "mic_voice_processing": false,
+  "on_stop": ["/absolute/path/to/trusted-hook", "--local-only"]
+}
+```
+
+Recording-root precedence is `--out`, then configuration, then
+`~/RegardingWork/Meetings`. `on_stop` is disabled unless an argv array is
+explicitly configured. It is executed directly, without a shell, and receives
+the session directory as its final argument. Treat it as an advanced,
+trusted-user feature.
 
 ## CLI
 
 ```sh
-quill                        # run the menu-bar daemon (^C to quit)
-quill run --out <dir>        # custom recordings root (default ~/Recordings)
-quill doctor                 # check permissions, recordings folder, models
-quill install --launch-at-login
-quill install --uninstall
+regardingwork-meetings
+regardingwork-meetings run --out <directory>
+regardingwork-meetings doctor
+regardingwork-meetings install --launch-at-login
+regardingwork-meetings install --uninstall
 ```
 
-## Stack
+The login agent identifier is `com.regardingwork.meetings`. Launching at login
+does not start a recording; recording always requires the visible menu action.
 
-- **Swift** — single SPM executable target
-- **Core Audio process tap** (`AudioHardwareCreateProcessTap`, macOS 14.2+) —
-  system audio capture via a private aggregate device
-- **AVAudioEngine** — mic capture
-- **AVAudioFile** — streaming AAC encode into CAF
-- **FluidAudio / Parakeet** — on-device Core ML transcription
-- **NSStatusItem** — the whole UI
+## Local architecture
 
-## Gotchas
+- `AVAudioEngine` captures and downmixes the default microphone.
+- A Core Audio global process tap captures all Mac playback.
+- CAF/AAC files stream to disk and preserve already-written audio on abrupt exit.
+- FluidAudio runs Parakeet TDT 0.6B v2/Core ML locally.
+- Track timestamps are offset, merged, and deterministically ordered.
+- No analytics, telemetry, SSO, sync, summarization, cloud transcription, or
+  external AI processing exists.
 
-- A global tap records *everything* the Mac plays — notification dings,
-  music, all of it. Don't play Spotify during meetings (or ask for a
-  per-process picker if it bothers you).
-- If recordings come out silent, check System Settings → Privacy & Security →
-  Screen & System Audio Recording.
-- Parakeet v2 is English-only. Other languages will come with the Whisper
-  engine.
-- The binary embeds its Info.plist (`__TEXT,__info_plist`) so TCC can
-  attribute permissions to quill itself when running as a LaunchAgent.
+Parakeet v2 is English-only. Multilingual Parakeet or Whisper remains a future
+option; neither is silently substituted or shipped here.
+
+## Privacy and operations
+
+Global system capture includes notifications, music, browser tabs, and unrelated
+applications. Use Focus mode and close unrelated media. Recording other people
+may require notice or consent. Read [PRIVACY.md](PRIVACY.md),
+[RECORDING_AND_CONSENT.md](RECORDING_AND_CONSENT.md), and [PILOT.md](PILOT.md)
+before a real meeting.
+
+## Upstream and license
+
+The complete upstream Git history and original MIT license are preserved.
+RegardingWork Meetings is derived from
+[digimata/quill](https://github.com/digimata/quill). See
+[UPSTREAM.md](UPSTREAM.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
+and the unchanged [LICENSE](LICENSE).
