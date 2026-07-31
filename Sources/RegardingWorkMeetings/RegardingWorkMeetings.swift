@@ -31,19 +31,21 @@ struct Run: ParsableCommand {
     private func runMain() throws {
         let root = Config.resolveRoot(cliOverride: out)
 
-        // Non-blocking: permissions prompt on first recording, so warnings at
-        // startup are informational, not fatal.
+        // Keep the app available so Welcome & Setup can explain and repair
+        // denied permissions or an unavailable recordings folder.
         let checks = DoctorReport.run(recordingsRoot: root)
         if !DoctorReport.allOK(checks) {
-            FileHandle.standardError.write(Data("startup checks failed:\n".utf8))
+            FileHandle.standardError.write(Data("startup checks need attention:\n".utf8))
             DoctorReport.print(checks)
-            throw ExitCode(1)
         }
 
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
+        let appDelegate = MeetingsApplicationDelegate()
+        app.delegate = appDelegate
         let controller = AppController(root: root)
+        appDelegate.onReopen = { [weak controller] in controller?.showSetup() }
 
         let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         sigint.setEventHandler {
@@ -84,13 +86,26 @@ final class AppController {
     private var session: RecordingSession?
     private var ticker: Timer?
     private var lastHealth: [String: TrackHealthState] = [:]
+    private var welcome: WelcomeWindowController?
 
     init(root: URL) {
         self.root = root
         menuBar.onToggle = { [weak self] in self?.toggle() }
+        menuBar.onShowSetup = { [weak self] in self?.showSetup() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
+
+        let welcome = WelcomeWindowController(recordingsRoot: root)
+        welcome.onToggleRecording = { [weak self] in self?.toggle() }
+        welcome.onOpenRecordings = { [weak self] in self?.openFolder() }
+        welcome.onClosed = {
+            NSApp.setActivationPolicy(.accessory)
+        }
+        self.welcome = welcome
+        if OnboardingPreferences.shouldShowOnLaunch() {
+            DispatchQueue.main.async { [weak self] in self?.showSetup() }
+        }
 
         let recovery = SessionRecovery.discover(root: root)
         if !recovery.recovered.isEmpty {
@@ -146,6 +161,8 @@ final class AppController {
         }
 
         menuBar.update(recording: true, elapsed: "0:00")
+        welcome?.noteRecordingStarted()
+        welcome?.updateRecording(true)
         updateHealth()
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -164,6 +181,7 @@ final class AppController {
         ticker?.invalidate()
         ticker = nil
         menuBar.update(recording: false, elapsed: nil)
+        welcome?.updateRecording(false)
 
         let dir = session.dir
         Task { [transcription] in await transcription.enqueue(dir) }
@@ -209,8 +227,12 @@ final class AppController {
     }
 
     private func openFolder() {
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try? SecureStorage.createDirectory(root)
         NSWorkspace.shared.open(root)
+    }
+
+    func showSetup() {
+        welcome?.showWindow(nil)
     }
 
     private static func format(_ interval: TimeInterval) -> String {

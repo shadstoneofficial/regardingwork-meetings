@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added a Welcome & Setup window that appears by default and remains accessible
+  from the menu bar or by reopening the running app.
+- Added microphone permission status/request, System Audio settings guidance,
+  on-device model preparation, recordings-folder access, consent/privacy
+  guidance, and a Start Test Recording action.
+- Keep the setup window available even when startup checks need attention, so a
+  denied permission no longer makes the app disappear before showing recovery
+  guidance.
 - Rebranded the package, target, executable, CLI, menu, permissions, paths,
   LaunchAgent, logs, bundle, packaging, docs, and assets as RegardingWork
   Meetings.

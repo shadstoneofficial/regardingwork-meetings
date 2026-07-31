@@ -10,6 +10,21 @@
 
 No real meeting should be the first recording.
 
+## Welcome and setup
+
+The app opens a visible **Welcome & Setup** window on first launch. Use it to:
+
+- request or repair microphone permission;
+- open Screen & System Audio Recording settings;
+- prepare the local Parakeet model before an important meeting;
+- review the global-capture and consent disclosure;
+- open the local recordings folder; and
+- start a short test recording.
+
+Closing setup leaves the waveform icon in the menu bar. Reopen setup from that
+menu or by opening the app again. If automatic setup display was disabled, the
+menu command remains available.
+
 ## Install an unsigned development build
 
 ```sh
@@ -25,10 +40,10 @@ will be less stable. Do not distribute either build as a production release.
 
 ## Prepare the model
 
-Run `regardingwork-meetings doctor`, then record and stop a short synthetic
-session while online. The first transcription downloads Parakeet models
-(approximately 600 MB). Confirm a later test transcribes with networking
-disabled. Do not wait for an important meeting to discover a missing model.
+Choose **Prepare Model (~600 MB)** in Welcome & Setup while online, or run
+`regardingwork-meetings doctor` and record a short synthetic session. Confirm a
+later test transcribes with networking disabled. Do not wait for an important
+meeting to discover a missing model.
 
 ## Permissions
 

@@ -30,12 +30,21 @@ in [PILOT.md](PILOT.md). No release workflow publishes artifacts.
 
 ## Use
 
-1. Launch the app and find its waveform icon in the menu bar.
-2. Choose **Start recording** and approve both macOS permissions.
-3. Confirm the menu shows `mic ✓ · system ✓` while someone speaks on each
+1. Launch the app. **Welcome & Setup** opens with microphone, system-audio,
+   model, storage, privacy, and consent guidance.
+2. Request microphone access and prepare the local Parakeet model. macOS asks
+   for Screen & System Audio Recording access when the first recording starts.
+3. Choose **Start Test Recording** in setup or **Start recording** from the
+   waveform menu-bar icon.
+4. Confirm the menu shows `mic ✓ · system ✓` while someone speaks on each
    source. `silent`, `stalled`, or `failed` is a real warning.
-4. Choose **Stop recording**. Parakeet transcribes locally in a serial queue.
-5. Open `~/RegardingWork/Meetings/<yyyy.MM.dd-HHmm>/`.
+5. Choose **Stop recording**. Parakeet transcribes locally in a serial queue.
+6. Open `~/RegardingWork/Meetings/<yyyy.MM.dd-HHmm>/`.
+
+Closing Welcome & Setup leaves the recorder available in the menu bar. Reopen
+the window at any time by opening the app again or choosing
+**Welcome & Setup…** from the menu. Its **Show this window when…opens**
+checkbox controls whether it appears automatically on future launches.
 
 Each completed session can contain:
 

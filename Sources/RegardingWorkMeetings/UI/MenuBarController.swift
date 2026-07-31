@@ -1,8 +1,8 @@
 import AppKit
 
 /// Status bar item in the top-right of the menu bar. Shows recording state at
-/// a glance and provides the only persistent control surface for the daemon
-/// (since we run as `.accessory` — no dock icon, no main window).
+/// a glance and keeps recording controls available after the setup window is
+/// closed.
 @MainActor
 final class MenuBarController {
     private let statusItem: NSStatusItem
@@ -13,6 +13,7 @@ final class MenuBarController {
     private let toggleItem: NSMenuItem
 
     var onToggle: (() -> Void)?
+    var onShowSetup: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onQuit: (() -> Void)?
 
@@ -43,6 +44,13 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        let setup = NSMenuItem(
+            title: "Welcome & Setup…",
+            action: #selector(showSetupClicked),
+            keyEquivalent: ","
+        )
+        menu.addItem(setup)
+
         toggleItem = NSMenuItem(
             title: "Start recording",
             action: #selector(toggleClicked),
@@ -66,7 +74,7 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [toggleItem, openFolder, quit] {
+        for item in [setup, toggleItem, openFolder, quit] {
             item.target = self
         }
 
@@ -142,6 +150,7 @@ final class MenuBarController {
     }
 
     @objc private func toggleClicked() { onToggle?() }
+    @objc private func showSetupClicked() { onShowSetup?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func quitClicked() { onQuit?() }
 }
