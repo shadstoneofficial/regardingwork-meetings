@@ -42,6 +42,12 @@ in [PILOT.md](PILOT.md). No release workflow publishes artifacts.
    symbol while Parakeet transcribes locally in a serial queue.
 6. Open `~/RegardingWork Meetings/<yyyy.MM.dd-HHmm>/`.
 
+If transcription shows the orange needs-attention state, choose **Retry
+unfinished transcriptions** from the menu. The app re-scans both current and
+legacy recording roots and queues sessions with `meta.json` but no completed
+`transcript.json`. Existing completed transcripts and original CAF audio are
+left unchanged.
+
 Closing Welcome & Setup leaves the **RW** recorder icon available in the menu bar. Reopen
 the window at any time by opening the app again or choosing
 **Welcome & Setup…** from the menu. Its **Show this window when…opens**

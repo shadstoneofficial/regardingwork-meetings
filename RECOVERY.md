@@ -34,6 +34,10 @@ beginning. It does not resume from a partial timestamp. Closing the MacBook lid
 normally suspends the running process and allows work to continue after wake,
 but waiting for completion before shutdown is safest.
 
+Choose **Retry unfinished transcriptions** from the menu to perform the same
+safe scan without restarting the app. This can be used after a temporary model
+or Core ML failure while later meetings continue through the serial queue.
+
 For manual inspection:
 
 ```sh

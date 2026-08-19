@@ -101,6 +101,11 @@ While transcription is active, confirm the menu-bar icon is blue and the menu
 says **transcribing locally…**. A red record icon takes precedence if another
 recording starts. A transcription failure uses an orange warning icon.
 
+For a disposable session, simulate or observe a transcription failure and
+choose **Retry unfinished transcriptions**. Confirm the failed session returns
+to the blue queue, later completed sessions are not transcribed again, and the
+original CAF files remain unchanged.
+
 Closing the MacBook lid normally suspends processing and allows it to continue
 after wake. Quitting, restarting, losing power, or shutting down interrupts the
 current transcription. On the next launch, a session with `meta.json` but no
