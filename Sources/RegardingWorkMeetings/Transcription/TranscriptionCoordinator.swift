@@ -11,6 +11,7 @@ actor TranscriptionCoordinator {
 
     private var queue: [URL] = []
     private var draining = false
+    private var currentDirectory: URL?
     private var engine: TranscriptionEngine?
     private var lastFailure: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
@@ -30,13 +31,51 @@ actor TranscriptionCoordinator {
 
     func resumePending(root: URL) {
         guard Config.transcriptionEnabled() else { return }
+        let pending = Self.pendingDirectories(root: root)
+        for directory in pending
+        where directory != currentDirectory && !queue.contains(directory) {
+            queue.append(directory)
+        }
+        if !pending.isEmpty {
+            FileHandle.standardError.write(
+                Data("resuming \(pending.count) untranscribed session(s)\n".utf8)
+            )
+        }
+        drainIfIdle()
+    }
+
+    /// Re-scan all configured discovery roots and queue every unfinished
+    /// session. A completed transcript.json is the final marker and is never
+    /// overwritten by this action.
+    func retryPending(roots: [URL]) -> Int {
+        guard Config.transcriptionEnabled() else { return 0 }
+        let candidates = roots
+            .flatMap(Self.pendingDirectories(root:))
+            .sorted { $0.path < $1.path }
+        var added = 0
+        for directory in candidates
+        where directory != currentDirectory && !queue.contains(directory) {
+            queue.append(directory)
+            added += 1
+        }
+        if added > 0 {
+            lastFailure = nil
+            FileHandle.standardError.write(
+                Data("retrying \(added) unfinished transcription(s)\n".utf8)
+            )
+        }
+        drainIfIdle()
+        return added
+    }
+
+    static func pendingDirectories(root: URL) -> [URL] {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: root,
-            includingPropertiesForKeys: nil
-        ) else { return }
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return [] }
 
         let manager = FileManager.default
-        let pending = entries
+        return entries
             .filter {
                 manager.fileExists(
                     atPath: $0.appendingPathComponent(SessionFileWriter.metadataName).path
@@ -46,15 +85,6 @@ actor TranscriptionCoordinator {
                     )
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        for directory in pending where !queue.contains(directory) {
-            queue.append(directory)
-        }
-        if !pending.isEmpty {
-            FileHandle.standardError.write(
-                Data("resuming \(pending.count) untranscribed session(s)\n".utf8)
-            )
-        }
-        drainIfIdle()
     }
 
     private func drainIfIdle() {
@@ -67,6 +97,7 @@ actor TranscriptionCoordinator {
     private func drain() async {
         while !queue.isEmpty {
             let directory = queue.removeFirst()
+            currentDirectory = directory
             publish(.transcribing(session: directory.lastPathComponent, queued: queue.count))
             do {
                 try await transcribe(directory)
@@ -83,6 +114,7 @@ actor TranscriptionCoordinator {
                     body: "\(directory.lastPathComponent) — see transcribe.log"
                 )
             }
+            currentDirectory = nil
         }
         await engine?.release()
         engine = nil

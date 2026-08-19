@@ -28,6 +28,7 @@ final class MenuBarController {
     private let healthLabel: NSMenuItem
     private let recoveryLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
+    private let retryTranscriptionItem: NSMenuItem
     private let toggleItem: NSMenuItem
     private var recording = false
     private var transcriptionFailed = false
@@ -35,6 +36,7 @@ final class MenuBarController {
     var onToggle: (() -> Void)?
     var onShowSetup: (() -> Void)?
     var onOpenFolder: (() -> Void)?
+    var onRetryTranscriptions: (() -> Void)?
     var onQuit: (() -> Void)?
 
     init() {
@@ -61,6 +63,13 @@ final class MenuBarController {
         transcriptionLabel.isEnabled = false
         transcriptionLabel.isHidden = true
         menu.addItem(transcriptionLabel)
+
+        retryTranscriptionItem = NSMenuItem(
+            title: "Retry unfinished transcriptions",
+            action: #selector(retryTranscriptionsClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(retryTranscriptionItem)
 
         menu.addItem(.separator())
 
@@ -94,7 +103,7 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [setup, toggleItem, openFolder, quit] {
+        for item in [retryTranscriptionItem, setup, toggleItem, openFolder, quit] {
             item.target = self
         }
 
@@ -190,10 +199,15 @@ final class MenuBarController {
         transcriptionFailed = text != nil && failed
         transcriptionLabel.title = text ?? ""
         transcriptionLabel.isHidden = text == nil
+        retryTranscriptionItem.isEnabled = text == nil || failed
         if !recording {
             stateLabel.title = idleStateTitle()
         }
         updateStatusIcon()
+    }
+
+    func finishRetryRequest(found: Int) {
+        if found == 0 { retryTranscriptionItem.isEnabled = true }
     }
 
     private func idleStateTitle() -> String {
@@ -226,5 +240,9 @@ final class MenuBarController {
     @objc private func toggleClicked() { onToggle?() }
     @objc private func showSetupClicked() { onShowSetup?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
+    @objc private func retryTranscriptionsClicked() {
+        retryTranscriptionItem.isEnabled = false
+        onRetryTranscriptions?()
+    }
     @objc private func quitClicked() { onQuit?() }
 }

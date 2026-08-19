@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a menu action to retry all unfinished local transcriptions without
+  restarting the app. Completed transcripts and original audio are preserved.
 - Added a Welcome & Setup window that appears by default and remains accessible
   from the menu bar or by reopening the running app.
 - Replaced the generic waveform menu-bar icon with a distinct monochrome

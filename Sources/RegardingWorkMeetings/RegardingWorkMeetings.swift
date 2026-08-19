@@ -93,6 +93,7 @@ final class AppController {
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onShowSetup = { [weak self] in self?.showSetup() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
+        menuBar.onRetryTranscriptions = { [weak self] in self?.retryTranscriptions() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
 
@@ -238,6 +239,23 @@ final class AppController {
     private func openFolder() {
         try? SecureStorage.createDirectory(root)
         NSWorkspace.shared.open(root)
+    }
+
+    private func retryTranscriptions() {
+        let roots = AppIdentity.recordingRootsForDiscovery(currentRoot: root)
+        Task { [transcription, weak self] in
+            let count = await transcription.retryPending(roots: roots)
+            await MainActor.run {
+                guard let self else { return }
+                self.menuBar.finishRetryRequest(found: count)
+                if count == 0 {
+                    notifyUser(
+                        title: "\(AppIdentity.productName) — nothing to retry",
+                        body: "No unfinished sessions were found. Completed transcripts were left unchanged."
+                    )
+                }
+            }
+        }
     }
 
     func showSetup() {

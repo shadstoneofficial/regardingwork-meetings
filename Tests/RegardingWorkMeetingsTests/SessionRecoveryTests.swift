@@ -84,6 +84,43 @@ struct SessionRecoveryTests {
         #expect(FileManager.default.fileExists(atPath: session.appendingPathComponent("recording.json").path))
     }
 
+    @Test("pending transcription discovery retries unfinished sessions only")
+    func findsPendingTranscriptions() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let unfinished = root.appendingPathComponent("2026.08.19-1000", isDirectory: true)
+        let completed = root.appendingPathComponent("2026.08.19-1100", isDirectory: true)
+        let recording = root.appendingPathComponent("2026.08.19-1200", isDirectory: true)
+        for directory in [unfinished, completed, recording] {
+            try SecureStorage.createDirectory(directory)
+        }
+        try SecureStorage.write(
+            Data("{}".utf8),
+            to: unfinished.appendingPathComponent(SessionFileWriter.metadataName)
+        )
+        try SecureStorage.write(
+            Data("{}".utf8),
+            to: completed.appendingPathComponent(SessionFileWriter.metadataName)
+        )
+        try SecureStorage.write(
+            Data("{}".utf8),
+            to: completed.appendingPathComponent("transcript.json")
+        )
+        try SecureStorage.write(
+            Data("{}".utf8),
+            to: recording.appendingPathComponent(SessionFileWriter.manifestName)
+        )
+
+        #expect(
+            TranscriptionCoordinator.pendingDirectories(root: root).map(\.lastPathComponent)
+                == ["2026.08.19-1000"]
+        )
+        #expect(
+            try Data(contentsOf: completed.appendingPathComponent("transcript.json"))
+                == Data("{}".utf8)
+        )
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("rwm-recovery-\(UUID().uuidString)", isDirectory: true)
