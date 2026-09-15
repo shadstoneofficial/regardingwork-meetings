@@ -17,6 +17,11 @@ This application is separate from RegardingWork Dictate.
 
 ## Development build
 
+For a signed release, open the downloaded DMG and drag
+**RegardingWork Meetings.app** onto the **Applications** shortcut shown beside
+it. Quit an older copy first and choose **Replace** when upgrading. Recordings
+are stored separately and are not removed by replacing the application.
+
 ```sh
 swift build -c release
 swift test

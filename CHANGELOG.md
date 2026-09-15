@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Set the next signed development artifact identity to version 0.1.3 (build 4).
+- Add the conventional Applications shortcut to signed DMGs and generate a
+  portable checksum that does not expose the build machine path.
 - Distinguished exact zero-filled microphone buffers from ordinary quiet,
   automatically rebuild the raw microphone input once, and preserve the failed
   attempt for diagnosis.

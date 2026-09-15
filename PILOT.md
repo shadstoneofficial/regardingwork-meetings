@@ -152,6 +152,10 @@ notarizes the DMG, verifies it, and writes SHA-256. Expected artifact:
 `dist/RegardingWork-Meetings-0.1.3.dmg`. Do not publish until both app and DMG
 verification pass. This repository does not publish automatically.
 
+Mount the final DMG read-only and confirm it contains exactly
+`RegardingWork Meetings.app` and an `Applications` shortcut. Installation is
+dragging the app onto that shortcut and choosing **Replace** for an upgrade.
+
 ## Uninstall and rollback
 
 ```sh
