@@ -222,7 +222,10 @@ final class AppController {
     private func updateHealth() {
         guard let session else { return }
         let health = session.health()
-        menuBar.updateHealth(health)
+        menuBar.updateHealth(
+            health,
+            microphoneName: session.microphoneDeviceName
+        )
         for track in ["mic", "system"] {
             guard let current = health[track] else { continue }
             let previous = lastHealth[track]

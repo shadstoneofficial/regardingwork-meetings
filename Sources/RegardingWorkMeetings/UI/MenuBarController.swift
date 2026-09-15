@@ -127,7 +127,12 @@ final class MenuBarController {
             ? "● recording · \(elapsed ?? "0:00")"
             : idleStateTitle()
         toggleItem.title = recording ? "Stop recording" : "Start recording"
-        if !recording { healthLabel.isHidden = true }
+        if !recording {
+            healthLabel.isHidden = true
+            statusItem.button?.title = ""
+        } else if healthLabel.isHidden {
+            statusItem.button?.title = " CHECK MIC"
+        }
         updateStatusIcon()
     }
 
@@ -178,13 +183,21 @@ final class MenuBarController {
         }
     }
 
-    func updateHealth(_ health: [String: TrackHealth]) {
+    func updateHealth(
+        _ health: [String: TrackHealth],
+        microphoneName: String? = nil
+    ) {
         guard let mic = health["mic"], let system = health["system"] else {
             healthLabel.isHidden = true
             return
         }
-        healthLabel.title = "mic \(mic.menuText) · system \(system.menuText)"
+        let device = microphoneName.map { " · \($0)" } ?? ""
+        healthLabel.title = "mic \(mic.menuText)\(device) · system \(system.menuText)"
         healthLabel.isHidden = false
+        statusItem.button?.title = MicrophoneSafety.menuBarLabel(for: mic.state)
+        let microphoneStatus = "\(AppIdentity.productName) — mic \(mic.menuText)\(device)"
+        statusItem.button?.toolTip = microphoneStatus
+        statusItem.button?.setAccessibilityLabel(microphoneStatus)
     }
 
     func updateRecovery(_ text: String?) {

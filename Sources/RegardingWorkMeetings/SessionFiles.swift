@@ -9,6 +9,10 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     let files: [String: String]
     var first_buffer_at: [String: String]
     var track_health: [String: TrackHealth]
+    var microphone_device: AudioInputDeviceIdentity? = nil
+    var microphone_recovery_attempted: Bool? = nil
+    var microphone_configuration_restarts: Int? = nil
+    var preserved_zero_filled_mic: String? = nil
 }
 
 struct SessionMetadata: Codable, Equatable, Sendable {
@@ -23,6 +27,11 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     let recovered: Bool
     let recovery_note: String?
     let attribution: String
+    var microphone_device_at_start: AudioInputDeviceIdentity? = nil
+    var microphone_device_at_end: AudioInputDeviceIdentity? = nil
+    var microphone_recovery_attempted: Bool? = nil
+    var microphone_configuration_restarts: Int? = nil
+    var preserved_zero_filled_mic: String? = nil
 }
 
 enum SessionFileWriter {

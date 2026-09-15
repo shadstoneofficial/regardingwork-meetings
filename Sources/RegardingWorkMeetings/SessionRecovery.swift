@@ -86,7 +86,12 @@ enum SessionRecovery {
                 track_health: health,
                 recovered: true,
                 recovery_note: "Recovered conservatively from recording.json after its owner process exited.",
-                attribution: "two-track source attribution (microphone=me, system=them), not speaker diarization"
+                attribution: "two-track source attribution (microphone=me, system=them), not speaker diarization",
+                microphone_device_at_start: manifest.microphone_device,
+                microphone_device_at_end: DefaultAudioInputDevice.current(),
+                microphone_recovery_attempted: manifest.microphone_recovery_attempted,
+                microphone_configuration_restarts: manifest.microphone_configuration_restarts,
+                preserved_zero_filled_mic: manifest.preserved_zero_filled_mic
             )
             do {
                 try SessionFileWriter.writeMetadata(metadata, to: directory)

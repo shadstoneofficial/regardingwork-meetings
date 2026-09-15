@@ -4,6 +4,31 @@ import Testing
 
 @Suite("Session manifests and recovery")
 struct SessionRecoveryTests {
+    @Test("older metadata remains readable without microphone diagnostics")
+    func decodesLegacyMetadata() throws {
+        let data = Data(
+            """
+            {
+              "schema_version": 1,
+              "session_id": "legacy",
+              "started": "2026-07-31T02:00:00Z",
+              "ended": "2026-07-31T02:01:00Z",
+              "duration_seconds": 60,
+              "files": {"mic": "mic.caf", "system": "system.caf"},
+              "start_offset_ms": {"mic": 0, "system": 0},
+              "track_health": {},
+              "recovered": false,
+              "recovery_note": null,
+              "attribution": "two-track source attribution"
+            }
+            """.utf8
+        )
+        let metadata = try JSONDecoder().decode(SessionMetadata.self, from: data)
+        #expect(metadata.microphone_device_at_start == nil)
+        #expect(metadata.microphone_configuration_restarts == nil)
+        #expect(metadata.preserved_zero_filled_mic == nil)
+    }
+
     @Test("interrupted session with one readable track is recovered without deletion")
     func recoversReadableTrack() throws {
         let root = try temporaryDirectory()

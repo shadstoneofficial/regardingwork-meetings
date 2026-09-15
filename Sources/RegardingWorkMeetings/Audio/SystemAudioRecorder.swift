@@ -55,6 +55,8 @@ final class SystemAudioRecorder: @unchecked Sendable {
                 firstBufferAt: $0.firstBufferAt,
                 lastBufferAt: $0.lastBufferAt,
                 lastSignalAt: $0.lastSignalAt,
+                lastNonzeroAt: $0.lastSignalAt,
+                zeroFilledSince: nil,
                 failure: $0.failure
             )
         }
