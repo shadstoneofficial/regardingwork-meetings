@@ -90,6 +90,11 @@ During a synthetic recording:
 - verify notifications are visible and the menu-bar record symbol remains red;
 - confirm unrelated Mac playback is present in `system.caf`.
 
+Also complete the device and zero-filled-buffer matrix in
+[MICROPHONE_RELIABILITY.md](MICROPHONE_RELIABILITY.md). Confirm **CHECK MIC**
+clears only after a real sample, the actual default input name is visible, and
+**MIC!** persists after an unsuccessful single recovery attempt.
+
 ## Transcript verification
 
 Compare several timestamps against both CAF tracks. Verify source attribution,
@@ -136,14 +141,15 @@ security find-identity -v -p codesigning
 xcrun notarytool history --keychain-profile "<profile>"
 SIGNING_IDENTITY="Developer ID Application: …" \
 NOTARY_PROFILE="<profile>" \
-APP_VERSION="0.1.0" \
+APP_VERSION="0.1.3" \
+BUILD_NUMBER="4" \
 scripts/sign-and-notarize.sh
 ```
 
 The script builds, signs with hardened runtime, verifies, submits with bounded
 polling, fetches failure logs, staples, assesses Gatekeeper, creates and
 notarizes the DMG, verifies it, and writes SHA-256. Expected artifact:
-`dist/RegardingWork-Meetings-0.1.0.dmg`. Do not publish until both app and DMG
+`dist/RegardingWork-Meetings-0.1.3.dmg`. Do not publish until both app and DMG
 verification pass. This repository does not publish automatically.
 
 ## Uninstall and rollback

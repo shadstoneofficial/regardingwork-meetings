@@ -37,7 +37,8 @@ in [PILOT.md](PILOT.md). No release workflow publishes artifacts.
 3. Choose **Start Test Recording** in setup or **Start recording** from the
    **RW** menu-bar icon.
 4. Confirm the menu shows `mic ✓ · system ✓` while someone speaks on each
-   source. `silent`, `stalled`, or `failed` is a real warning.
+   source. `silent`, `digital silence`, `route changed`, `stalled`, or `failed`
+   is a real warning.
 5. Choose **Stop recording**. The menu-bar icon becomes a blue processing
    symbol while Parakeet transcribes locally in a serial queue.
 6. Open `~/RegardingWork Meetings/<yyyy.MM.dd-HHmm>/`.
@@ -47,6 +48,12 @@ unfinished transcriptions** from the menu. The app re-scans both current and
 legacy recording roots and queues sessions with `meta.json` but no completed
 `transcript.json`. Existing completed transcripts and original CAF audio are
 left unchanged.
+
+At recording start, **CHECK MIC** remains beside the red recording symbol until
+the selected input produces a real sample. The menu shows the exact macOS
+default microphone. **MIC!** means digital silence, a stalled/failed input, or
+a route change needs immediate attention. See
+[MICROPHONE_RELIABILITY.md](MICROPHONE_RELIABILITY.md).
 
 Closing Welcome & Setup leaves the **RW** recorder icon available in the menu bar. Reopen
 the window at any time by opening the app again or choosing
@@ -60,6 +67,7 @@ Each completed session can contain:
 | `mic.caf` | Local microphone; transcript source label `me` |
 | `system.caf` | Everything the Mac played; source label `them` |
 | `meta.json` | Timing, source attribution, recovery, and final track health |
+| `mic.zero-filled.caf` | Preserved diagnostic evidence after automatic zero-input recovery |
 | `transcript.json` | Canonical transcript, including preserved echo candidates |
 | `transcript.md` | Readable transcript with visible warnings |
 | `transcribe.log` | Progress and errors; never transcript text |

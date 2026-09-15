@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_VERSION="${APP_VERSION:-0.1.3}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/dist}"
 APP_PATH="${APP_PATH:-${OUTPUT_DIR}/RegardingWork Meetings.app}"
 DMG_PATH="${OUTPUT_DIR}/RegardingWork-Meetings-${APP_VERSION}.dmg"
@@ -52,7 +52,7 @@ notarize_and_staple() {
 }
 
 cd "${PROJECT_ROOT}"
-APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-1}" \
+APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-4}" \
     SKIP_CODESIGN=1 OUTPUT_DIR="${OUTPUT_DIR}" scripts/build-app.sh
 
 codesign --force --deep --options runtime --timestamp \
