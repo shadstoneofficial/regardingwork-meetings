@@ -3,14 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_VERSION="${APP_VERSION:-0.1.3}"
-BUILD_NUMBER="${BUILD_NUMBER:-4}"
+APP_VERSION="${APP_VERSION:-0.1.4}"
+BUILD_NUMBER="${BUILD_NUMBER:-5}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/dist}"
 APP_PATH="${OUTPUT_DIR}/RegardingWork Meetings.app"
 CONTENTS="${APP_PATH}/Contents"
 
 cd "${PROJECT_ROOT}"
-swift build -c release
+if [[ -n "${SWIFT_BUILD_WRAPPER:-}" ]]; then
+    "${SWIFT_BUILD_WRAPPER}" build -c release
+else
+    swift build -c release --jobs "${SWIFT_JOBS:-2}"
+fi
 
 rm -rf "${APP_PATH}"
 mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Resources"
@@ -23,6 +27,8 @@ sed \
     -e "s/@BUILD_NUMBER@/${BUILD_NUMBER}/g" \
     packaging/Info.plist > "${CONTENTS}/Info.plist"
 plutil -lint "${CONTENTS}/Info.plist"
+plutil -insert RWSourceCommit -string "$(git rev-parse HEAD)" "${CONTENTS}/Info.plist"
+plutil -insert RWSourceBranch -string "$(git branch --show-current)" "${CONTENTS}/Info.plist"
 
 ICON_WORK="$(mktemp -d)"
 trap 'rm -rf "${ICON_WORK}"' EXIT

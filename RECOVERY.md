@@ -11,6 +11,8 @@ failed.
 
 At session start, the app atomically writes `recording.json` with a session ID,
 owner PID, expected tracks, start time, first-buffer times, and recent health.
+Version 0.1.4 also records persisted last-buffer timestamps, observed health
+changes and microphone route history as private session evidence.
 On clean stop it writes `meta.json` first and then removes the in-progress
 manifest.
 
@@ -30,19 +32,26 @@ At relaunch, the app scans the current recordings root. When the new default
 
 Recovery never fabricates a missing source, overwrites an existing completed
 session, or deletes original audio. A recovered transcript can be one-sided.
-Current limitations: recovery marks readable tracks as `recovered`, which can
-hide earlier silence/failure warnings, and uses relaunch time for session end
-and duration. Readability is not proof of complete or audible capture. Consult
-the preserved manifest and listen to both tracks; retaining historical health
-and deriving the actual capture endpoint are planned fixes, not shipped ones.
+Version 0.1.4 retains historical failure/silence states and original sidecar
+bytes. Capture end is derived from persisted buffer times and readable audio
+duration, not relaunch or today's microphone. Older manifests without endpoint
+evidence can have an explicitly noted zero/unknown duration. Readability is not
+proof of complete or audible capture. Consult the original manifest and listen
+to both tracks. Unavailable sources remain in metadata for later retry; no
+missing audio is fabricated.
 
 If recording stopped cleanly but transcription was interrupted, `meta.json`
 and the CAF files remain. Because `transcript.json` is the completion marker,
-the app queues that session again after relaunch and transcribes it from the
-beginning. It does not resume from a partial timestamp. A current limitation is
-that track-level transcription errors can still leave `transcript.json`; that
-session is then skipped by retry. See the improvement plan for partial-output
-handling. Closing the MacBook lid
+the app queues that session again after relaunch. Version 0.1.4 keeps successful
+tracks in user-only `transcription-state.json` and retries unfinished tracks.
+Incomplete reports are `transcript.partial.md` / `.json`; only all successfully
+processed sources create final `transcript.json`. A readable track with no
+recognized speech is distinct from an empty/unreadable file. Later meetings
+continue through the queue after a failure. Resume is at track granularity,
+not a timestamp within a failed track. Older final transcripts, including ones
+with incomplete warnings from earlier versions, remain untouched and require
+manual inspection on a copied session; this beta does not silently redo them.
+Closing the MacBook lid
 normally suspends the running process and allows work to continue after wake,
 but waiting for completion before shutdown is safest.
 

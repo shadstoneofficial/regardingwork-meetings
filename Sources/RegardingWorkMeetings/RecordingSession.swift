@@ -10,8 +10,11 @@ final class RecordingSession {
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
     private var lastManifestWrite = Date.distantPast
+    private var routeHistory = MicrophoneRouteHistory()
+    private var currentMicrophone: AudioInputDeviceIdentity?
+    private var healthHistory: [String: [TrackHealthObservation]] = [:]
 
-    var microphoneDeviceName: String? { mic.deviceAtStart?.name }
+    var microphoneDeviceName: String? { currentMicrophone?.name }
 
     private static let folderFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -42,6 +45,7 @@ final class RecordingSession {
         do {
             try system.start(writingTo: audioURL("system"))
             try mic.start(writingTo: audioURL("mic"))
+            routeHistory.observe(mic.deviceAtStart, at: startedAt)
         } catch {
             mic.stop()
             system.stop()
@@ -61,6 +65,8 @@ final class RecordingSession {
     /// active when both buffers and an audible signal have been observed.
     @discardableResult
     func health(now: Date = Date(), persist: Bool = true) -> [String: TrackHealth] {
+        currentMicrophone = DefaultAudioInputDevice.current()
+        routeHistory.observe(currentMicrophone, at: now)
         var micHealth = TrackHealthEvaluator.evaluate(
             snapshot: mic.snapshot(),
             sessionStartedAt: startedAt,
@@ -70,7 +76,7 @@ final class RecordingSession {
         micHealth = MicrophoneSafety.applyingRouteChange(
             to: micHealth,
             startedDevice: mic.deviceAtStart,
-            currentDevice: DefaultAudioInputDevice.current()
+            currentDevice: currentMicrophone
         )
         if micHealth.state == .active, mic.configurationRestartCount > 0 {
             micHealth = TrackHealth(
@@ -86,6 +92,11 @@ final class RecordingSession {
                 now: now
             ),
         ]
+        for (track, health) in result where healthHistory[track]?.last?.health != health {
+            healthHistory[track, default: []].append(TrackHealthObservation(
+                observed_at: ISO8601DateFormatter().string(from: now), health: health
+            ))
+        }
         if persist, now.timeIntervalSince(lastManifestWrite) >= 5 {
             try? writeManifest(health: result)
             lastManifestWrite = now
@@ -129,10 +140,12 @@ final class RecordingSession {
             recovery_note: recoveryNote,
             attribution: "two-track source attribution (microphone=me, system=them), not speaker diarization",
             microphone_device_at_start: mic.deviceAtStart,
-            microphone_device_at_end: DefaultAudioInputDevice.current(),
+            microphone_device_at_end: currentMicrophone,
             microphone_recovery_attempted: mic.digitalSilenceRecoveryAttempted,
             microphone_configuration_restarts: mic.configurationRestartCount,
-            preserved_zero_filled_mic: mic.preservedZeroFile
+            preserved_zero_filled_mic: mic.preservedZeroFile,
+            microphone_route_history: routeHistory.observations,
+            track_health_history: healthHistory
         )
         do {
             try SessionFileWriter.writeMetadata(metadata, to: dir)
@@ -155,6 +168,9 @@ final class RecordingSession {
         var firstBuffers: [String: String] = [:]
         if let first = mic.firstBufferAt { firstBuffers["mic"] = iso.string(from: first) }
         if let first = system.firstBufferAt { firstBuffers["system"] = iso.string(from: first) }
+        var lastBuffers: [String: String] = [:]
+        if let last = mic.snapshot().lastBufferAt { lastBuffers["mic"] = iso.string(from: last) }
+        if let last = system.snapshot().lastBufferAt { lastBuffers["system"] = iso.string(from: last) }
         let manifest = RecordingManifest(
             schema_version: 1,
             state: "in_progress",
@@ -167,7 +183,11 @@ final class RecordingSession {
             microphone_device: mic.deviceAtStart,
             microphone_recovery_attempted: mic.digitalSilenceRecoveryAttempted,
             microphone_configuration_restarts: mic.configurationRestartCount,
-            preserved_zero_filled_mic: mic.preservedZeroFile
+            preserved_zero_filled_mic: mic.preservedZeroFile,
+            last_buffer_at: lastBuffers,
+            microphone_device_at_capture: currentMicrophone,
+            microphone_route_history: routeHistory.observations,
+            track_health_history: healthHistory
         )
         try SessionFileWriter.writeManifest(manifest, to: dir)
     }

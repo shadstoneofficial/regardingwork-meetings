@@ -15,22 +15,45 @@ actor TranscriptionCoordinator {
     private var engine: TranscriptionEngine?
     private var lastFailure: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
+    private let engineFactory: @Sendable () -> any TranscriptionEngine
+    private let inspectAudio: @Sendable (URL) -> AudioAvailability
+    private let enabled: @Sendable () -> Bool
+    private let notification: @Sendable (String, String) -> Void
+    private let completionHook: @Sendable (URL) -> Void
+
+    init(
+        engineFactory: @escaping @Sendable () -> any TranscriptionEngine = { ParakeetEngine() },
+        inspectAudio: @escaping @Sendable (URL) -> AudioAvailability = AudioAvailability.inspect,
+        enabled: @escaping @Sendable () -> Bool = Config.transcriptionEnabled,
+        notification: @escaping @Sendable (String, String) -> Void = { notifyUser(title: $0, body: $1) },
+        completionHook: @escaping @Sendable (URL) -> Void = TranscriptionCoordinator.runConfiguredHook
+    ) {
+        self.engineFactory = engineFactory
+        self.inspectAudio = inspectAudio
+        self.enabled = enabled
+        self.notification = notification
+        self.completionHook = completionHook
+    }
+
+    var isProcessing: Bool { draining }
 
     func setStatusHandler(_ handler: @escaping @Sendable (Status) -> Void) {
         statusHandler = handler
     }
 
     func enqueue(_ sessionDir: URL) {
-        guard Config.transcriptionEnabled() else {
-            runHook(for: sessionDir)
+        guard enabled() else {
+            completionHook(sessionDir)
             return
         }
-        if !queue.contains(sessionDir) { queue.append(sessionDir) }
+        let directory = Self.canonicalDirectory(sessionDir)
+        guard directory != currentDirectory, !Self.isCompleted(directory) else { return }
+        if !queue.contains(directory) { queue.append(directory) }
         drainIfIdle()
     }
 
     func resumePending(root: URL) {
-        guard Config.transcriptionEnabled() else { return }
+        guard enabled() else { return }
         let pending = Self.pendingDirectories(root: root)
         for directory in pending
         where directory != currentDirectory && !queue.contains(directory) {
@@ -48,7 +71,7 @@ actor TranscriptionCoordinator {
     /// session. A completed transcript.json is the final marker and is never
     /// overwritten by this action.
     func retryPending(roots: [URL]) -> Int {
-        guard Config.transcriptionEnabled() else { return 0 }
+        guard enabled() else { return 0 }
         let candidates = roots
             .flatMap(Self.pendingDirectories(root:))
             .sorted { $0.path < $1.path }
@@ -80,11 +103,18 @@ actor TranscriptionCoordinator {
                 manager.fileExists(
                     atPath: $0.appendingPathComponent(SessionFileWriter.metadataName).path
                 )
-                    && !manager.fileExists(
-                        atPath: $0.appendingPathComponent("transcript.json").path
-                    )
+                    && !Self.isCompleted($0)
             }
+            .map(Self.canonicalDirectory)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func isCompleted(_ directory: URL) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("transcript.json").path)
+    }
+
+    private static func canonicalDirectory(_ directory: URL) -> URL {
+        URL(fileURLWithPath: directory.resolvingSymlinksInPath().path, isDirectory: true)
     }
 
     private func drainIfIdle() {
@@ -100,19 +130,18 @@ actor TranscriptionCoordinator {
             currentDirectory = directory
             publish(.transcribing(session: directory.lastPathComponent, queued: queue.count))
             do {
+                guard !Self.isCompleted(directory) else {
+                    currentDirectory = nil
+                    continue
+                }
                 try await transcribe(directory)
-                notifyUser(
-                    title: "\(AppIdentity.productName) — transcript ready",
-                    body: directory.lastPathComponent
-                )
-                runHook(for: directory)
+                notification("\(AppIdentity.productName) — transcript ready", directory.lastPathComponent)
+                completionHook(directory)
             } catch {
-                log(directory, "transcription failed: \(error)")
+                Self.log(directory, "transcription unfinished (\(String(reflecting: type(of: error)))); retry available")
                 lastFailure = directory.lastPathComponent
-                notifyUser(
-                    title: "\(AppIdentity.productName) — transcription failed",
-                    body: "\(directory.lastPathComponent) — see transcribe.log"
-                )
+                notification("\(AppIdentity.productName) — transcription needs attention",
+                    "\(directory.lastPathComponent) — see transcribe.log; Retry unfinished transcriptions is available")
             }
             currentDirectory = nil
         }
@@ -125,35 +154,53 @@ actor TranscriptionCoordinator {
 
     private func transcribe(_ directory: URL) async throws {
         let metadata = try SessionMeta.read(from: directory)
-        let engine = try await preparedEngine()
-
-        var trackTranscripts: [TrackTranscript] = []
+        guard !metadata.tracks.isEmpty else { throw TranscriptionProgress.ProgressError.changedSources }
+        var progress = try TranscriptionProgress.load(directory: directory, sources: metadata.tracks)
+        let engine: any TranscriptionEngine
+        do {
+            engine = try await preparedEngine()
+        } catch {
+            progress.state = "failed"
+            try progress.write(to: directory)
+            throw error
+        }
+        if let previous = progress.engine, let model = progress.model,
+           previous != engine.name || model != engine.model {
+            throw TranscriptionProgress.ProgressError.incompatibleEngine
+        }
+        progress.engine = engine.name
+        progress.model = engine.model
         var warnings: [String] = metadata.trackWarnings
-        for track in metadata.tracks {
+        for index in progress.tracks.indices {
+            if progress.tracks[index].outcome.succeeded { continue }
+            let track = progress.tracks[index].source
             let audio = directory.appendingPathComponent(track.file)
-            guard FileManager.default.fileExists(atPath: audio.path) else {
-                let warning = "\(track.file) is missing; transcript may be incomplete"
-                warnings.append(warning)
-                log(directory, warning)
-                continue
+            progress.tracks[index].failure_class = nil
+            switch inspectAudio(audio) {
+            case .missing: progress.tracks[index].outcome = .missing
+            case .empty: progress.tracks[index].outcome = .emptyAudio
+            case .unreadable: progress.tracks[index].outcome = .unreadable
+            case .readable:
+                Self.log(directory, "transcribing \(track.file) (\(engine.name))")
+                do {
+                    let segments = try await engine.transcribe(audio)
+                    progress.tracks[index].segments = segments
+                    progress.tracks[index].outcome = segments.isEmpty ? .noSpeech : .transcribed
+                } catch {
+                    progress.tracks[index].outcome = .failed
+                    progress.tracks[index].failure_class = String(reflecting: type(of: error))
+                }
             }
-            log(directory, "transcribing \(track.file) (\(engine.name))")
-            let segments: [TranscriptSegment]
-            do {
-                segments = try await engine.transcribe(audio)
-            } catch {
-                let warning = "\(track.file) was unreadable; transcript may be incomplete"
-                warnings.append(warning)
-                log(directory, "\(warning): \(error)")
-                continue
-            }
-            trackTranscripts.append(
-                TrackTranscript(
-                    speaker: track.speaker,
-                    offsetMs: track.offsetMs,
-                    segments: segments
-                )
-            )
+            progress.state = "partial"
+            try progress.write(to: directory)
+        }
+        let complete = progress.tracks.allSatisfy { $0.outcome.succeeded }
+        for track in progress.tracks where track.outcome != .transcribed {
+            warnings.append("\(track.source.file): \(track.outcome.rawValue)"
+                + (track.outcome.succeeded ? " (no speech recognized)" : "; unfinished and retryable"))
+        }
+        let trackTranscripts = progress.tracks.filter { $0.outcome.succeeded }.map {
+            TrackTranscript(speaker: $0.source.speaker, offsetMs: $0.source.offsetMs, segments: $0.segments)
         }
         var merged = TranscriptMerger.merge(trackTranscripts)
         let duplicateResult = DuplicateDetector.annotate(merged)
@@ -178,8 +225,11 @@ actor TranscriptionCoordinator {
             warnings: warnings,
             segments: merged
         )
-        try transcript.write(to: directory)
-        log(
+        progress.state = complete ? "complete" : (trackTranscripts.isEmpty ? "failed" : "partial")
+        try progress.write(to: directory)
+        try transcript.write(to: directory, partial: !complete)
+        guard complete else { throw TranscriptionProgress.ProgressError.unfinishedTracks }
+        Self.log(
             directory,
             "done — \(merged.count) segments, \(warnings.count) warning(s), "
                 + "\(duplicateResult.suppressedCount) high-confidence echo suppression(s)"
@@ -196,7 +246,7 @@ actor TranscriptionCoordinator {
                 )
             )
         }
-        let engine = ParakeetEngine()
+        let engine = engineFactory()
         try await engine.prepare()
         self.engine = engine
         return engine
@@ -204,7 +254,7 @@ actor TranscriptionCoordinator {
 
     /// Executes only a trusted argv array from the user's config. No shell is
     /// involved, and no metadata or transcript content can become executable.
-    private func runHook(for directory: URL) {
+    private static func runConfiguredHook(_ directory: URL) {
         guard let command = Config.onStop() else { return }
         let invocation = command.invocation(sessionDirectory: directory)
         let task = Process()
@@ -217,7 +267,7 @@ actor TranscriptionCoordinator {
         }
     }
 
-    private func log(_ directory: URL, _ message: String) {
+    private static func log(_ directory: URL, _ message: String) {
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
         do {
             try SecureStorage.append(
@@ -266,7 +316,7 @@ enum TranscriptMerger {
 }
 
 struct SessionMeta: Equatable {
-    struct Track: Equatable {
+    struct Track: Codable, Equatable, Sendable {
         let file: String
         let speaker: String
         let offsetMs: Int
@@ -305,6 +355,10 @@ struct SessionMeta: Equatable {
                 Track(file: system, speaker: "them", offsetMs: offsets["system"] ?? 0)
             )
         }
+        guard tracks.allSatisfy({
+            !$0.file.isEmpty && $0.file == URL(fileURLWithPath: $0.file).lastPathComponent
+                && !$0.file.hasPrefix(".")
+        }) else { throw MetaError.unreadable(url) }
 
         var warnings: [String] = []
         if let health = json["track_health"] as? [String: [String: Any]] {
@@ -316,6 +370,17 @@ struct SessionMeta: Equatable {
                 else { continue }
                 warnings.append("\(track) track ended with \(state) health")
             }
+        }
+        if let history = json["track_health_history"] as? [String: [[String: Any]]] {
+            for track in ["mic", "system"] {
+                let states = (history[track] ?? []).compactMap { ($0["health"] as? [String: Any])?["state"] as? String }
+                for state in Set(states).sorted() where !["active", "recovered", "starting"].contains(state) {
+                    warnings.append("\(track) track historically reported \(state) health")
+                }
+            }
+        }
+        if json["preserved_zero_filled_mic"] as? String != nil {
+            warnings.append("a zero-filled microphone attempt was preserved; inspect the original audio")
         }
         return SessionMeta(tracks: tracks, trackWarnings: warnings)
     }
@@ -341,16 +406,17 @@ struct Transcript: Codable, Equatable {
 
     /// Markdown is written first and transcript.json last. The JSON file is
     /// the completion marker, so a Markdown failure remains retryable.
-    func write(to directory: URL) throws {
+    func write(to directory: URL, partial: Bool = false) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let markdown = Data(rendered(title: directory.lastPathComponent).utf8)
+        let markdown = Data(rendered(title: directory.lastPathComponent, partial: partial).utf8)
         let json = try encoder.encode(self)
-        try SecureStorage.write(markdown, to: directory.appendingPathComponent("transcript.md"))
-        try SecureStorage.write(json, to: directory.appendingPathComponent("transcript.json"))
+        let stem = partial ? "transcript.partial" : "transcript"
+        try SecureStorage.write(markdown, to: directory.appendingPathComponent("\(stem).md"))
+        try SecureStorage.write(json, to: directory.appendingPathComponent("\(stem).json"))
     }
 
-    func rendered(title: String) -> String {
+    func rendered(title: String, partial: Bool = false) -> String {
         var lines = [
             "# \(title)",
             "",
@@ -359,6 +425,9 @@ struct Transcript: Codable, Equatable {
             "> Attribution: \(attribution).",
             "",
         ]
+        if partial {
+            lines += ["> PARTIAL / UNFINISHED: successful track output is preserved; retry the unfinished tracks.", ""]
+        }
         if !warnings.isEmpty {
             lines.append("## Recording and transcript warnings")
             lines.append("")

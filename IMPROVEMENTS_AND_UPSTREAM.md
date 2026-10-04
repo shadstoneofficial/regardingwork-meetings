@@ -1,5 +1,17 @@
 # Reliability improvements and upstream contribution plan
 
+## 2026-10-04 beta implementation follow-up
+
+The v0.1.4 candidate implements per-track retry checkpoints/partial reports,
+historical health and capture-end recovery, current default microphone/route
+history, common-mode monitoring and committed-gap accounting. See
+[CHANGELOG.md](CHANGELOG.md), [RECOVERY.md](RECOVERY.md) and [PILOT.md](PILOT.md).
+The audit below is a snapshot of v0.1.3, not a claim that those old defects
+remain unchanged in this candidate. Segmented/PCM recording, broader UI work
+and playback-echo changes remain proposals. Physical-device, real inference,
+sleep/wake and actual-app crash tests are not certified by synthetic tests.
+The candidate is not merged or publicly published.
+
 Reviewed: 2026-10-03. This is a source review and implementation proposal, not
 a statement that the improvements below have shipped. The first focused
 upstream contribution, manual transcription retry, is now submitted as

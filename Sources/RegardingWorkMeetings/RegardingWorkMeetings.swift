@@ -174,8 +174,8 @@ final class AppController {
         welcome?.noteRecordingStarted()
         welcome?.updateRecording(true)
         updateHealth()
-        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        ticker = RecordingMonitor.schedule { [weak self] in
+            self?.tick()
         }
     }
 
@@ -206,7 +206,7 @@ final class AppController {
                 queued > 0 ? "transcribing \(name) · \(queued) queued" : "transcribing \(name)"
             )
         case .failed(let name):
-            menuBar.updateTranscription("transcription failed · \(name)", failed: true)
+            menuBar.updateTranscription("transcription unfinished · \(name) · retry available", failed: true)
         }
     }
 

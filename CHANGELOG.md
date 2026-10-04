@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.4 Beta Candidate (build 5) - 2026-10-04
+
+- Keep failed inference, missing, empty and unreadable audio unfinished and
+  retryable instead of creating false completion markers.
+- Retain successful per-track output in private checkpoints and reuse it on
+  retry. Partial reports are labelled separately; existing final transcripts
+  and original audio are never automatically replaced.
+- Retain historical health, digital-zero evidence and observed microphone routes
+  during recovery. Derive duration from persisted buffers/readable audio, not
+  relaunch time; unknown duration is not invented.
+- Keep health/timing monitoring active while menus are tracking, and show the
+  current default microphone without clearing degraded health on route change.
+- Count each committed restart-gap chunk once and invalidate scheduled
+  configuration retries on stop.
+- Add injected-engine, recovery, continuity and synthetic run-loop regressions.
+- Bound notarization requests and poll retries, keep diagnostics private, support
+  external build/temp storage and embed the exact source commit in the app.
+- Preserve AAC-in-CAF, local Parakeet and existing playback-echo defaults. Abruptly
+  interrupted AAC can still be unreadable; real-device/inference/crash testing
+  remains mandatory. This candidate is unmerged and not a stable release.
+
 ## Unreleased
 
 - Set the next signed development artifact identity to version 0.1.3 (build 4).

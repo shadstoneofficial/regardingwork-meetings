@@ -15,6 +15,9 @@ Recordings/
 **/system.caf
 **/transcript.json
 **/transcript.md
+**/transcript.partial.json
+**/transcript.partial.md
+**/transcription-state.json
 **/recording.json
 **/recording.recovered.json
 .env
