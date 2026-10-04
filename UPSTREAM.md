@@ -5,6 +5,11 @@ license of the project cloned from:
 
 `https://github.com/digimata/quill.git`
 
+As checked on 2026-10-03, that URL redirects to
+[humanitas-labs/quill](https://github.com/humanitas-labs/quill). The configured
+remote remains unchanged. The original Andrew Jones MIT license in this
+repository must not be replaced by upstream's newer copyright notice.
+
 Remotes:
 
 ```text
@@ -18,30 +23,52 @@ RegardingWork Meetings.
 
 ## Reviewed upstream context
 
-Reviewed initially on 2026-07-31 and refreshed on 2026-09-15, with source code
-treated as authoritative. The upstream default branch still ends at commit
-`855869e` (the fork point); the relevant reliability work below remains in
-issues and pull requests rather than a merged upstream release:
+Reviewed initially on 2026-07-31, refreshed on 2026-09-15, and checked again on
+2026-10-03. The earlier snapshots are historical. Source code is authoritative.
+Upstream `master` now ends at `aad60f98e680720dd24a30115580f226ae36c12c`, has
+reorganized native macOS code under `macos/`, and includes
+[route-recovery commit `8c46659`](https://github.com/humanitas-labs/quill/commit/8c46659a2a67638ccbf36e1d4d1e0036c81976f4).
 
-- Issues #14 and #19: duplicated system playback in the microphone transcript
-  and incorrect-looking `me`/`them` attribution.
-- Issue #11 and PR #6: invisible track failures and a file-growth watchdog.
-- Issue #8: interrupted sessions with readable CAF files but no `meta.json`.
-- PR #2: mic capture stopping after call-app input reconfiguration.
-- PR #7: write Markdown before JSON so JSON remains the completion marker.
-- PR #18: recorder shared-state races and invalid menu SVG markup.
-- Issue #23: broad global capture and a proposed future per-app selector.
-- Issues #5 and #13 plus PRs #4 and #9: multilingual Parakeet and Whisper
-  requests. These are documented as future options and are not added here.
-- PR #12: `.app`/DMG Developer ID signing and notarization direction.
-- PR #20 and issue #22: true remote-speaker diarization/naming proposals; these
-  are outside this product's two-track attribution scope.
+That implementation preserves numbered capture segments, records interruptions,
+uses bounded recovery retries and a monotonic timeline, and keeps watchdog/menu
+timers running in common run-loop modes. Physical route validation remains
+tracked in [issue #64](https://github.com/humanitas-labs/quill/issues/64).
 
-No cloud transcription PR was adopted. No upstream PR was merged wholesale;
-the local implementation follows this repository's privacy and preservation
-guardrails. The microphone reliability work adapts PR #2's configuration-change
-observer and same-file recovery idea while retaining RegardingWork's exact-zero
-detection, visible track health, restrictive file handling, and metadata.
+Relevant current work:
+
+- [PR #71](https://github.com/humanitas-labs/quill/pull/71), open: crash manifests,
+  interrupted-segment recovery, and JSON written last as the completion marker.
+  It also proposes PCM instead of AAC because the author found unfinalized AAC
+  unreadable. Our narrower synthetic writer check reproduced that risk; this
+  is not a test of an actual Meetings app crash or permission behavior.
+- [PR #72](https://github.com/humanitas-labs/quill/pull/72), open: imported audio
+  transcription, including Voice Memos. This is a future feature reference.
+- [Issue #56](https://github.com/humanitas-labs/quill/issues/56): playback echo
+  filtering; preserve legitimate repetitions and original audio.
+- [Issue #57](https://github.com/humanitas-labs/quill/issues/57): settings and
+  private paths/logs; coordinate focused storage-hardening contributions.
+- [Issues #59](https://github.com/humanitas-labs/quill/issues/59),
+  [#60](https://github.com/humanitas-labs/quill/issues/60), and
+  [#61](https://github.com/humanitas-labs/quill/issues/61): permission identity,
+  permanent startup failures, and app-bundle/signing work.
+- Multilingual Parakeet, Whisper, per-app capture, and diarization remain
+  separate upstream planning topics, not additions to this local product.
+
+Older PRs #2, #6, #7, #12, and #18 are closed, not pending merged fixes. The
+existing RegardingWork microphone work adapted historical PR #2's
+configuration-change observer and same-file recovery concept; upstream's newer
+segmented design is different and needs a selective integration review.
+
+No cloud transcription PR was adopted, and no upstream PR was merged wholesale.
+See [IMPROVEMENTS_AND_UPSTREAM.md](IMPROVEMENTS_AND_UPSTREAM.md) for local gaps,
+verification limits, contribution candidates, and an approval-gated PR plan.
+
+On 2026-10-03, the manual-retry feature was adapted to upstream master and
+submitted as [draft PR #73](https://github.com/humanitas-labs/quill/pull/73)
+from the separate `shadstoneofficial/quill` contribution fork. The release
+build, 39 tests (7 new), CLI help, and formatting/diff checks passed locally.
+Actual capture, menu interaction, and Parakeet inference were not manually
+tested. The PR remains a draft, not an upstream merge or a new product build.
 
 ## Migration from an upstream development install
 

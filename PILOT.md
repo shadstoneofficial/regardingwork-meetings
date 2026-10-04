@@ -28,7 +28,7 @@ menu command remains available.
 ## Install an unsigned development build
 
 ```sh
-git switch agent/regardingwork-meetings-hardening
+git switch codex/reliability-beta-014
 swift test
 scripts/build-app.sh
 open "dist/RegardingWork Meetings.app"
@@ -111,11 +111,16 @@ choose **Retry unfinished transcriptions**. Confirm the failed session returns
 to the blue queue, later completed sessions are not transcribed again, and the
 original CAF files remain unchanged.
 
+For v0.1.4, confirm a failed track stays unfinished, successful output remains
+in `transcription-state.json`, and retry reuses it. Confirm partial reports have
+warnings and no false final `transcript.json`. Run two back-to-back disposable
+sessions and confirm the first failure does not block the second.
+
 Closing the MacBook lid normally suspends processing and allows it to continue
 after wake. Quitting, restarting, losing power, or shutting down interrupts the
 current transcription. On the next launch, a session with `meta.json` but no
-`transcript.json` is queued again from the beginning; original CAF audio is
-preserved. Wait for transcription to finish before shutdown when practical.
+`transcript.json` is queued again, reusing successful track checkpoints where
+present; original CAF audio is preserved. Wait for completion when practical.
 
 ## Interrupted-session recovery
 
@@ -126,8 +131,18 @@ relaunch, and confirm:
 - the menu reports recovery;
 - `meta.json` has `recovered: true`;
 - `recording.recovered.json` is preserved;
-- only readable tracks are queued;
+- readable sources transcribe while unavailable sources remain retryable;
 - missing/unreadable tracks are warned, not fabricated or deleted.
+- historical failure/digital-zero warnings survive;
+- end/duration reflects capture evidence, not next-day relaunch;
+- the current device is not substituted for historical capture identity;
+- original manifest bytes and audio remain unchanged.
+
+Hold the actual menu open and confirm timing/health updates. Change the default
+microphone and verify its current name and degraded status. With disposable
+capture, test repeated configuration failures and stop during retry; inspect
+the audio timeline for duplicated gap padding. Unit tests do not certify these
+physical behaviors.
 
 Do not claim crash recovery is verified until this manual test succeeds on the
 target Mac.
@@ -141,16 +156,23 @@ security find-identity -v -p codesigning
 xcrun notarytool history --keychain-profile "<profile>"
 SIGNING_IDENTITY="Developer ID Application: …" \
 NOTARY_PROFILE="<profile>" \
-APP_VERSION="0.1.3" \
-BUILD_NUMBER="4" \
+APP_VERSION="0.1.4" \
+BUILD_NUMBER="5" \
 scripts/sign-and-notarize.sh
 ```
 
 The script builds, signs with hardened runtime, verifies, submits with bounded
 polling, fetches failure logs, staples, assesses Gatekeeper, creates and
 notarizes the DMG, verifies it, and writes SHA-256. Expected artifact:
-`dist/RegardingWork-Meetings-0.1.3.dmg`. Do not publish until both app and DMG
+`dist/RegardingWork-Meetings-0.1.4.dmg`. Do not publish until both app and DMG
 verification pass. This repository does not publish automatically.
+
+Signing refuses dirty source and supports `EXPECTED_SOURCE_COMMIT`. On Janice's
+external checkout set `SWIFT_BUILD_WRAPPER` to the host's approved Swift helper
+and `TMPDIR` to external private staging. Default compilation uses two jobs.
+Notarization submits once, retains the ID, bounds each request and retries info
+with backoff. Failure diagnostics stay in ignored `dist/notary/`; an uncertain
+submit outcome requires history/info review before resubmission.
 
 Mount the final DMG read-only and confirm it contains exactly
 `RegardingWork Meetings.app` and an `Applications` shortcut. Installation is

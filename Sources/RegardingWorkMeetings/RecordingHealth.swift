@@ -121,11 +121,17 @@ enum MicrophoneSafety {
         startedDevice: AudioInputDeviceIdentity?,
         currentDevice: AudioInputDeviceIdentity?
     ) -> TrackHealth {
-        guard
-            let startedDevice,
-            let currentDevice,
-            startedDevice.uid != currentDevice.uid
-        else { return health }
+        guard let currentDevice else {
+            if health.needsAttention {
+                return TrackHealth(state: health.state, detail: health.detail + "; current default microphone unavailable")
+            }
+            return TrackHealth(state: .routeChanged, detail: "current default microphone is unavailable; verify capture and start a new recording")
+        }
+        guard let startedDevice, startedDevice.uid != currentDevice.uid else { return health }
+        if health.needsAttention {
+            return TrackHealth(state: health.state,
+                detail: health.detail + "; microphone changed from \(startedDevice.name) to \(currentDevice.name)")
+        }
         return TrackHealth(
             state: .routeChanged,
             detail: "microphone changed from \(startedDevice.name) to \(currentDevice.name); start a new recording"
@@ -139,4 +145,32 @@ enum MicrophoneSafety {
         default: return ""
         }
     }
+}
+
+/// Counts only silence actually committed to disk, even across failed restarts.
+struct CaptureGapTimeline {
+    private(set) var writtenThrough: Date?
+
+    mutating func noteBuffer(at date: Date) {
+        writtenThrough = max(writtenThrough ?? date, date)
+    }
+
+    func missingSeconds(until date: Date) -> TimeInterval {
+        guard let writtenThrough else { return 0 }
+        return max(0, date.timeIntervalSince(writtenThrough))
+    }
+
+    mutating func commitPadding(seconds: TimeInterval) {
+        guard let writtenThrough, seconds > 0 else { return }
+        self.writtenThrough = writtenThrough.addingTimeInterval(seconds)
+    }
+}
+
+struct CaptureRestartGeneration {
+    private(set) var value = 0
+    private var active = false
+
+    mutating func start() { value += 1; active = true }
+    mutating func stop() { value += 1; active = false }
+    func permits(_ token: Int) -> Bool { active && token == value }
 }

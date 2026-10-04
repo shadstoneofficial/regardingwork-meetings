@@ -63,8 +63,7 @@ final class SystemAudioRecorder: @unchecked Sendable {
     }
 
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
-    /// extension — CAF needs no finalization pass, so a crash mid-meeting
-    /// loses nothing already written).
+    /// extension — interrupted AAC may still require finalization to decode).
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
 

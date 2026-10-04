@@ -44,6 +44,8 @@ final class MicRecorder: @unchecked Sendable {
     private(set) var deviceAtStart: AudioInputDeviceIdentity?
     private var configurationObserver: NSObjectProtocol?
     private var configurationRestartPending = false
+    private var restartGeneration = CaptureRestartGeneration()
+    private var tapInstalled = false
 
     private struct LockedState {
         var file: AVAudioFile?
@@ -57,6 +59,7 @@ final class MicRecorder: @unchecked Sendable {
         var configurationRestartCount = 0
         var preservedZeroFile: String?
         var failure: String?
+        var gapTimeline = CaptureGapTimeline()
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
@@ -85,13 +88,14 @@ final class MicRecorder: @unchecked Sendable {
     var configurationRestartCount: Int { state.withLock { $0.configurationRestartCount } }
 
     /// Start capturing the mic, encoding AAC into `url` (use a .caf extension
-    /// — CAF needs no finalization pass, so a crash loses nothing written).
+    /// — interrupted AAC may still require finalization to decode).
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
         self.url = url
         deviceAtStart = DefaultAudioInputDevice.current()
         try attach(voiceProcessing: Config.micVoiceProcessing())
         isRecording = true
+        restartGeneration.start()
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: nil,
@@ -106,13 +110,14 @@ final class MicRecorder: @unchecked Sendable {
     func stop() {
         guard isRecording else { return }
         isRecording = false
+        restartGeneration.stop()
         configurationRestartPending = false
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)
             self.configurationObserver = nil
         }
         engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        removeTapIfInstalled()
         state.withLock { $0.file = nil }
         if let url { try? SecureStorage.protectFile(url) }
     }
@@ -171,7 +176,7 @@ final class MicRecorder: @unchecked Sendable {
             do {
                 try engine.start()
             } catch {
-                input.removeTap(onBus: 0)
+                removeTapIfInstalled()
                 throw RecorderError.engineStartFailed(error)
             }
             state.withLock {
@@ -219,7 +224,7 @@ final class MicRecorder: @unchecked Sendable {
         do {
             try engine.start()
         } catch {
-            input.removeTap(onBus: 0)
+            removeTapIfInstalled()
             state.withLock { $0.file = nil }
             throw RecorderError.engineStartFailed(error)
         }
@@ -235,6 +240,7 @@ final class MicRecorder: @unchecked Sendable {
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             self?.write(buffer)
         }
+        tapInstalled = true
     }
 
     /// Raw path: tap at the device's native format and downmix to mono. Same
@@ -277,6 +283,7 @@ final class MicRecorder: @unchecked Sendable {
                 self.recordFailure("mic conversion failed: \(error)")
             }
         }
+        tapInstalled = true
     }
 
     private func write(_ buffer: AVAudioPCMBuffer) {
@@ -289,6 +296,7 @@ final class MicRecorder: @unchecked Sendable {
             let shouldRecover = state.withLock {
                 if $0.firstBufferAt == nil { $0.firstBufferAt = now }
                 $0.lastBufferAt = now
+                $0.gapTimeline.noteBuffer(at: now)
                 if hasSignal { $0.lastSignalAt = now }
                 if hasNonzeroSample {
                     $0.lastNonzeroAt = now
@@ -376,7 +384,7 @@ final class MicRecorder: @unchecked Sendable {
 
         configurationRestartPending = true
         engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        removeTapIfInstalled()
         state.withLock { $0.file = nil }
         let evidence = availableEvidenceURL(beside: url)
         do {
@@ -396,6 +404,7 @@ final class MicRecorder: @unchecked Sendable {
             $0.lastNonzeroAt = nil
             $0.zeroFilledSince = nil
             $0.failure = nil
+            $0.gapTimeline = CaptureGapTimeline()
         }
         do {
             try attach(voiceProcessing: false)
@@ -428,8 +437,10 @@ final class MicRecorder: @unchecked Sendable {
         FileHandle.standardError.write(Data(
             "mic: input configuration changed — restarting capture\n".utf8
         ))
+        let token = restartGeneration.value
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.restartAfterConfigurationChange()
+            guard let self, self.restartGeneration.permits(token) else { return }
+            self.restartAfterConfigurationChange()
         }
     }
 
@@ -451,9 +462,13 @@ final class MicRecorder: @unchecked Sendable {
         guard isRecording else { return }
         configurationRestartPending = true
         engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        padGapWithSilence()
+        removeTapIfInstalled()
+        state.withLock {
+            $0.lastBufferAt = nil
+            $0.lastSignalAt = nil
+        }
         do {
+            try padGapWithSilence()
             try attach(voiceProcessing: false, reusingFile: true)
             if countsConfigurationChange {
                 state.withLock { $0.configurationRestartCount += 1 }
@@ -465,26 +480,33 @@ final class MicRecorder: @unchecked Sendable {
                 configurationRestartPending = false
                 return
             }
+            let token = restartGeneration.value
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
+                guard let self, self.restartGeneration.permits(token) else { return }
                 self.configurationRestartPending = false
                 self.restartAfterConfigurationChange()
             }
         }
     }
 
-    private func padGapWithSilence() {
-        let values = state.withLock { ($0.file, $0.lastBufferAt) }
-        guard let file = values.0, let lastBufferAt = values.1 else { return }
-        let gap = Date().timeIntervalSince(lastBufferAt)
+    private func removeTapIfInstalled() {
+        guard tapInstalled else { return }
+        engine.inputNode.removeTap(onBus: 0)
+        tapInstalled = false
+    }
+
+    private func padGapWithSilence() throws {
+        let values = state.withLock { ($0.file, $0.gapTimeline) }
+        guard let file = values.0 else { throw RecorderError.missingExistingFile }
+        let gap = values.1.missingSeconds(until: Date())
         guard gap > 0.05 else { return }
         let format = file.processingFormat
-        var remaining = AVAudioFrameCount(gap * format.sampleRate)
-        let chunkSize = AVAudioFrameCount(format.sampleRate)
+        var remaining = Int64(gap * format.sampleRate)
+        let chunkSize = max(1, AVAudioFrameCount(format.sampleRate))
         while remaining > 0 {
-            let count = min(remaining, chunkSize)
+            let count = AVAudioFrameCount(min(remaining, Int64(chunkSize)))
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
-                return
+                throw RecorderError.formatUnsupported(format)
             }
             buffer.frameLength = count
             if let channels = buffer.floatChannelData {
@@ -492,13 +514,9 @@ final class MicRecorder: @unchecked Sendable {
                     channels[channel].update(repeating: 0, count: Int(count))
                 }
             }
-            do {
-                try file.write(from: buffer)
-            } catch {
-                recordFailure("mic gap padding failed: \(error)")
-                return
-            }
-            remaining -= count
+            try file.write(from: buffer)
+            state.withLock { $0.gapTimeline.commitPadding(seconds: Double(count) / format.sampleRate) }
+            remaining -= Int64(count)
         }
     }
 

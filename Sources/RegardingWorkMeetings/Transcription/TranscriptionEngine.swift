@@ -2,7 +2,7 @@ import Foundation
 
 /// One timed span of recognized speech from a single track, relative to that
 /// track's own start.
-struct TranscriptSegment: Sendable {
+struct TranscriptSegment: Codable, Equatable, Sendable {
     let start: TimeInterval
     let end: TimeInterval
     let text: String

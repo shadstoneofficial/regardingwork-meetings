@@ -24,10 +24,12 @@ No transcript text or conversation content is included in this incident note.
 
 Current hardening distinguishes exact digital zeros from ordinary quiet:
 
-1. At recording start, the menu bar displays **CHECK MIC** until a real
-   microphone sample is observed.
-2. The current macOS default input name appears in Welcome & Setup and in the
-   live recording-health line.
+1. At recording start, the menu bar displays **CHECK MIC** until a
+   nonzero microphone sample is observed; this alone does not prove speech.
+2. Welcome & Setup shows the current macOS default input. The recording-health
+   line in v0.1.4 shows the current macOS default microphone, not a startup-only
+   snapshot. Observed routes and health changes are retained privately, with
+   the initial capture device recorded separately.
 3. If every microphone sample remains exactly zero for two seconds, the app
    preserves that attempt as `mic.zero-filled.caf`, rebuilds the raw microphone
    input graph once, and continues the session in `mic.caf`.
@@ -37,14 +39,20 @@ Current hardening distinguishes exact digital zeros from ordinary quiet:
    debounces the change, reattaches raw capture to the same open CAF, pads the
    short restart gap to preserve the shared timeline, and records the restart
    count. Existing microphone audio is not replaced.
+   Version 0.1.4 counts committed padding once across repeated failed restarts
+   and invalidates scheduled configuration retries on stop.
 6. If zero-filled buffers continue, the menu bar retains **MIC!**, the menu
    reports `digital silence`, and a visible notification explains the failure.
 7. If the macOS default input changes during recording, the menu reports the
    old and new device names and instructs the user to start a new recording.
 
-The app does not repeatedly restart the input engine because a recovery loop
-could create additional gaps or discard diagnostic evidence. It never treats
+Digital-zero repair is limited to one attempt; configuration restart failures
+can retry until stopped. The app never treats
 exact zeros as healthy audio.
+
+Version 0.1.4 uses common run-loop modes for health/timing checks while a menu
+is tracking. A synthetic run-loop test verifies registration; actual menu-open
+recording still requires pilot testing.
 
 ## Immediate response during a call
 
@@ -86,24 +94,25 @@ macOS permission behavior.
 
 ## Upstream comparison
 
-Reviewed `digimata/quill` again on 2026-09-15. Its default branch has no commits
-after the commit from which this fork diverged, so there is no merged upstream
-microphone fix to pull. Relevant work remains open:
+Checked again on 2026-10-03. `digimata/quill` now redirects to
+`humanitas-labs/quill`, and its current `master` includes
+[segmented route recovery](https://github.com/humanitas-labs/quill/commit/8c46659a2a67638ccbf36e1d4d1e0036c81976f4).
+The September observation that upstream had no newer commits is no longer
+current.
 
-- [PR #2](https://github.com/digimata/quill/pull/2) observes
-  `AVAudioEngineConfigurationChange` and reattaches a microphone tap after a
-  call app changes the input configuration. This branch adapts that recovery
-  concept to the hardened recorder and keeps its file-preservation behavior.
-- [PR #6](https://github.com/digimata/quill/pull/6) reports tracks that stop
-  growing. RegardingWork Meetings instead evaluates live buffer and signal
-  timestamps every second and exposes each track's state in the menu.
-- [PR #18](https://github.com/digimata/quill/pull/18) proposes locks around
-  recorder state. The fork already protects callback/main-thread recorder
-  state with `OSAllocatedUnfairLock`.
-- [Issue #11](https://github.com/digimata/quill/issues/11) requests visible
-  track failures, and [issue #8](https://github.com/digimata/quill/issues/8)
-  requests interrupted-session recovery. Both remain open upstream; the fork
-  already implements the corresponding health and manifest/recovery flows.
+Upstream restarts failed capture into numbered files, retains prior segments,
+records interruption history, and runs its watchdog in common run-loop modes.
+The physical-device validation matrix remains open in
+[issue #64](https://github.com/humanitas-labs/quill/issues/64). Historical PRs
+#2, #6, and #18 are closed; they should not be described as still-open fixes.
+
+RegardingWork's existing same-file restart/padding and exact-zero recovery are
+different. Version 0.1.4 addresses repeated-gap accounting, durable health
+history and current default-device display without changing the recording
+format. Physical recovery still needs testing. A displayed device name or nonzero
+sample is not proof that the intended speaker was recorded. See
+[IMPROVEMENTS_AND_UPSTREAM.md](IMPROVEMENTS_AND_UPSTREAM.md) for the reviewed
+gaps, test evidence, and proposed integration/contribution boundaries.
 
 The upstream configuration-change report involved a microphone file that
 stopped growing. The verified RegardingWork incident produced a full-duration

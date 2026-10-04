@@ -71,8 +71,10 @@ struct SessionRecoveryTests {
             from: Data(contentsOf: session.appendingPathComponent("meta.json"))
         )
         #expect(metadata.recovered)
-        #expect(metadata.files == ["mic": "mic.caf"])
+        #expect(metadata.files == ["mic": "mic.caf", "system": "system.caf"])
         #expect(metadata.track_health["system"]?.state == .missing)
+        #expect(metadata.duration_seconds == 0)
+        #expect(metadata.microphone_device_at_end == nil)
     }
 
     @Test("apparently active or unreadable sessions remain untouched")
@@ -151,5 +153,44 @@ struct SessionRecoveryTests {
             .appendingPathComponent("rwm-recovery-\(UUID().uuidString)", isDirectory: true)
         try SecureStorage.createDirectory(url)
         return url
+    }
+
+    @Test("next-day recovery preserves digital silence, failures, routes and the original manifest")
+    func historicalEvidence() throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root.appendingPathComponent("interrupted")
+        try SecureStorage.createDirectory(session)
+        let device = AudioInputDeviceIdentity(id: 1, uid: "synthetic-mic", name: "Fixture input")
+        let manifest = RecordingManifest(schema_version: 1, state: "in_progress", session_id: "historic", owner_pid: 1,
+            started_at: "2026-10-03T00:00:00Z", files: ["mic": "mic.caf", "system": "system.caf"],
+            first_buffer_at: ["mic": "2026-10-03T00:00:01Z", "system": "2026-10-03T00:00:00Z"],
+            track_health: ["mic": TrackHealth(state: .digitalSilence, detail: "digital zeros"),
+                "system": TrackHealth(state: .failed, detail: "write failed")],
+            microphone_device: device, preserved_zero_filled_mic: "mic.zero-filled.caf",
+            last_buffer_at: ["mic": "2026-10-03T00:01:00Z"], microphone_device_at_capture: device,
+            microphone_route_history: [MicrophoneRouteObservation(observed_at: "2026-10-03T00:00:00Z", device: device)],
+            track_health_history: ["mic": [TrackHealthObservation(observed_at: "2026-10-03T00:00:30Z",
+                health: TrackHealth(state: .stalled, detail: "historical capture stalled"))]])
+        try SessionFileWriter.writeManifest(manifest, to: session)
+        let original = try Data(contentsOf: session.appendingPathComponent("recording.json"))
+        let report = SessionRecovery.discover(root: root,
+            now: ISO8601DateFormatter().date(from: "2026-10-04T00:00:00Z")!,
+            processIsAlive: { _ in false }, audioIsReadable: { _ in true }, audioDuration: { _ in 65 })
+        #expect(report.recovered == ["interrupted"])
+        let metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: session.appendingPathComponent("meta.json")))
+        #expect(metadata.duration_seconds == 66)
+        #expect(metadata.ended == "2026-10-03T00:01:06Z")
+        #expect(metadata.track_health["mic"]?.state == .digitalSilence)
+        #expect(metadata.track_health["system"]?.state == .failed)
+        #expect(metadata.microphone_device_at_end == device)
+        #expect(metadata.microphone_route_history == manifest.microphone_route_history)
+        #expect(metadata.track_health_history == manifest.track_health_history)
+        #expect(metadata.preserved_zero_filled_mic == "mic.zero-filled.caf")
+        let transcriptionMetadata = try SessionMeta.read(from: session)
+        #expect(transcriptionMetadata.trackWarnings.contains("mic track historically reported stalled health"))
+        #expect(transcriptionMetadata.trackWarnings.contains { $0.contains("zero-filled microphone attempt") })
+        #expect(try Data(contentsOf: session.appendingPathComponent("recording.recovered.json")) == original)
     }
 }

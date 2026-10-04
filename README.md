@@ -54,10 +54,15 @@ legacy recording roots and queues sessions with `meta.json` but no completed
 `transcript.json`. Existing completed transcripts and original CAF audio are
 left unchanged.
 
+Known limitation: a failed individual track can still produce `transcript.json`
+and be skipped by retry. Check both sources and transcript warnings; correcting
+partial-completion handling is in the improvement plan.
+
 At recording start, **CHECK MIC** remains beside the red recording symbol until
-the selected input produces a real sample. The menu shows the exact macOS
-default microphone. **MIC!** means digital silence, a stalled/failed input, or
-a route change needs immediate attention. See
+the input produces a nonzero sample. That alone does not prove speech capture.
+The menu names the microphone selected at session start; after a route change
+that label can be stale. **MIC!** means digital silence, a stalled/failed input,
+or a route change needs immediate attention. See
 [MICROPHONE_RELIABILITY.md](MICROPHONE_RELIABILITY.md).
 
 Closing Welcome & Setup leaves the **RW** recorder icon available in the menu bar. Reopen
@@ -89,9 +94,10 @@ is two-track source attribution, not identification or diarization of multiple
 remote speakers.
 
 Speaker playback can bleed into the microphone. Headphones are the preferred
-setup. High-confidence overlapping duplicates are hidden only from Markdown;
-the canonical JSON marks and retains them, and original audio is never removed.
-Weaker matches stay visible with warnings.
+setup. Heuristically matched duplicates are hidden only from Markdown; the
+canonical JSON marks and retains them, and original audio is never removed.
+Weaker matches stay visible with warnings. This text/timing heuristic can hide
+a legitimate repeated response, so consult JSON/audio when speech seems missing.
 
 Optional Apple voice processing can reduce speaker echo:
 
@@ -146,7 +152,8 @@ does not start a recording; recording always requires the visible menu action.
 
 - `AVAudioEngine` captures and downmixes the default microphone.
 - A Core Audio global process tap captures all Mac playback.
-- CAF/AAC files stream to disk and preserve already-written audio on abrupt exit.
+- CAF/AAC files stream to disk. Interrupted files are preserved, but unfinalized
+  AAC may be undecodable; see [RECOVERY.md](RECOVERY.md).
 - FluidAudio runs Parakeet TDT 0.6B v2/Core ML locally.
 - Track timestamps are offset, merged, and deterministically ordered.
 - No analytics, telemetry, SSO, sync, summarization, cloud transcription, or
@@ -154,6 +161,10 @@ does not start a recording; recording always requires the visible menu action.
 
 Parakeet v2 is English-only. Multilingual Parakeet or Whisper remains a future
 option; neither is silently substituted or shipped here.
+
+See [IMPROVEMENTS_AND_UPSTREAM.md](IMPROVEMENTS_AND_UPSTREAM.md) for the
+2026-10-03 reliability review, current upstream status, and proposed next-beta
+and contribution work. Those proposals are not shipped fixes.
 
 ## Privacy and operations
 
