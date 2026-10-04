@@ -3,8 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_VERSION="${APP_VERSION:-0.1.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
+APP_VERSION="${APP_VERSION:-0.1.3}"
+BUILD_NUMBER="${BUILD_NUMBER:-4}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/dist}"
 APP_PATH="${OUTPUT_DIR}/RegardingWork Meetings.app"
 CONTENTS="${APP_PATH}/Contents"

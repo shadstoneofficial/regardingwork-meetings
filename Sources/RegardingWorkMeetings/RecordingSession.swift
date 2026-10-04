@@ -11,6 +11,8 @@ final class RecordingSession {
     private let system = SystemAudioRecorder()
     private var lastManifestWrite = Date.distantPast
 
+    var microphoneDeviceName: String? { mic.deviceAtStart?.name }
+
     private static let folderFormat: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy.MM.dd-HHmm"
@@ -59,12 +61,25 @@ final class RecordingSession {
     /// active when both buffers and an audible signal have been observed.
     @discardableResult
     func health(now: Date = Date(), persist: Bool = true) -> [String: TrackHealth] {
+        var micHealth = TrackHealthEvaluator.evaluate(
+            snapshot: mic.snapshot(),
+            sessionStartedAt: startedAt,
+            now: now,
+            detectDigitalSilence: true
+        )
+        micHealth = MicrophoneSafety.applyingRouteChange(
+            to: micHealth,
+            startedDevice: mic.deviceAtStart,
+            currentDevice: DefaultAudioInputDevice.current()
+        )
+        if micHealth.state == .active, mic.configurationRestartCount > 0 {
+            micHealth = TrackHealth(
+                state: .recovered,
+                detail: "input configuration changed and microphone capture restarted; verify the mic indicator"
+            )
+        }
         let result = [
-            "mic": TrackHealthEvaluator.evaluate(
-                snapshot: mic.snapshot(),
-                sessionStartedAt: startedAt,
-                now: now
-            ),
+            "mic": micHealth,
             "system": TrackHealthEvaluator.evaluate(
                 snapshot: system.snapshot(),
                 sessionStartedAt: startedAt,
@@ -112,7 +127,12 @@ final class RecordingSession {
             track_health: health,
             recovered: false,
             recovery_note: recoveryNote,
-            attribution: "two-track source attribution (microphone=me, system=them), not speaker diarization"
+            attribution: "two-track source attribution (microphone=me, system=them), not speaker diarization",
+            microphone_device_at_start: mic.deviceAtStart,
+            microphone_device_at_end: DefaultAudioInputDevice.current(),
+            microphone_recovery_attempted: mic.digitalSilenceRecoveryAttempted,
+            microphone_configuration_restarts: mic.configurationRestartCount,
+            preserved_zero_filled_mic: mic.preservedZeroFile
         )
         do {
             try SessionFileWriter.writeMetadata(metadata, to: dir)
@@ -143,7 +163,11 @@ final class RecordingSession {
             started_at: iso.string(from: startedAt),
             files: ["mic": "mic.caf", "system": "system.caf"],
             first_buffer_at: firstBuffers,
-            track_health: health
+            track_health: health,
+            microphone_device: mic.deviceAtStart,
+            microphone_recovery_attempted: mic.digitalSilenceRecoveryAttempted,
+            microphone_configuration_restarts: mic.configurationRestartCount,
+            preserved_zero_filled_mic: mic.preservedZeroFile
         )
         try SessionFileWriter.writeManifest(manifest, to: dir)
     }

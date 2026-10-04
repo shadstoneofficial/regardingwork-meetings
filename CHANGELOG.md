@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Set the next signed development artifact identity to version 0.1.3 (build 4).
+- Add the conventional Applications shortcut to signed DMGs and generate a
+  portable checksum that does not expose the build machine path.
+- Distinguished exact zero-filled microphone buffers from ordinary quiet,
+  automatically rebuild the raw microphone input once, and preserve the failed
+  attempt for diagnosis.
+- Show **CHECK MIC** until microphone liveness is established and retain a
+  prominent **MIC!** indicator for digital silence, route changes, stalls, or
+  failures.
+- Display and persist the selected macOS default microphone identity, detect
+  route changes, and document the verified zero-filled-buffer incident and
+  hardware test matrix.
+- Restart microphone capture after call-app input reconfiguration while
+  appending to the same CAF, preserving earlier audio and timestamp alignment.
 - Added a menu action to retry all unfinished local transcriptions without
   restarting the app. Completed transcripts and original audio are preserved.
 - Added a Welcome & Setup window that appears by default and remains accessible

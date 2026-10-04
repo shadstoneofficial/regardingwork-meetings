@@ -18,7 +18,10 @@ RegardingWork Meetings.
 
 ## Reviewed upstream context
 
-Reviewed on 2026-07-31, with source code treated as authoritative:
+Reviewed initially on 2026-07-31 and refreshed on 2026-09-15, with source code
+treated as authoritative. The upstream default branch still ends at commit
+`855869e` (the fork point); the relevant reliability work below remains in
+issues and pull requests rather than a merged upstream release:
 
 - Issues #14 and #19: duplicated system playback in the microphone transcript
   and incorrect-looking `me`/`them` attribution.
@@ -36,7 +39,9 @@ Reviewed on 2026-07-31, with source code treated as authoritative:
 
 No cloud transcription PR was adopted. No upstream PR was merged wholesale;
 the local implementation follows this repository's privacy and preservation
-guardrails.
+guardrails. The microphone reliability work adapts PR #2's configuration-change
+observer and same-file recovery idea while retaining RegardingWork's exact-zero
+detection, visible track health, restrictive file handling, and metadata.
 
 ## Migration from an upstream development install
 

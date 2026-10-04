@@ -19,6 +19,11 @@ synchronization, summarization, cloud transcription, or external AI processing.
 The application cannot guarantee that unrelated audio is absent. Use Focus,
 close unrelated media, and run the pilot checks before important meetings.
 
+The microphone device name and Core Audio device identifier are stored in the
+local session manifest and metadata for reliability diagnosis. They are not
+uploaded. If exact zero-filled input triggers automatic recovery, the original
+zero-filled attempt is retained locally rather than silently deleted.
+
 ## Storage and permissions
 
 The default root is `~/RegardingWork Meetings`. Session directories are mode

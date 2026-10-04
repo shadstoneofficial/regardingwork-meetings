@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_VERSION="${APP_VERSION:-0.1.3}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/dist}"
 APP_PATH="${APP_PATH:-${OUTPUT_DIR}/RegardingWork Meetings.app}"
 DMG_PATH="${OUTPUT_DIR}/RegardingWork-Meetings-${APP_VERSION}.dmg"
@@ -11,6 +11,12 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:?Set SIGNING_IDENTITY to a Developer ID App
 NOTARY_PROFILE="${NOTARY_PROFILE:?Set NOTARY_PROFILE to a notarytool keychain profile name}"
 MAX_POLLS="${MAX_POLLS:-60}"
 POLL_SECONDS="${POLL_SECONDS:-10}"
+DMG_STAGE="$(mktemp -d /tmp/regardingwork-meetings-dmg.XXXXXX)"
+
+cleanup() {
+    rm -rf "${DMG_STAGE}"
+}
+trap cleanup EXIT
 
 notarize_and_staple() {
     local submission_artifact="$1"
@@ -52,7 +58,7 @@ notarize_and_staple() {
 }
 
 cd "${PROJECT_ROOT}"
-APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-1}" \
+APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-4}" \
     SKIP_CODESIGN=1 OUTPUT_DIR="${OUTPUT_DIR}" scripts/build-app.sh
 
 codesign --force --deep --options runtime --timestamp \
@@ -67,12 +73,17 @@ rm -f "${APP_ZIP}"
 spctl --assess --type execute --verbose=2 "${APP_PATH}"
 
 rm -f "${DMG_PATH}"
+ditto "${APP_PATH}" "${DMG_STAGE}/RegardingWork Meetings.app"
+ln -s /Applications "${DMG_STAGE}/Applications"
 hdiutil create -volname "RegardingWork Meetings" \
-    -srcfolder "${APP_PATH}" -ov -format UDZO "${DMG_PATH}"
+    -srcfolder "${DMG_STAGE}" -ov -format UDZO "${DMG_PATH}"
 codesign --force --timestamp --sign "${SIGNING_IDENTITY}" "${DMG_PATH}"
 notarize_and_staple "${DMG_PATH}" "${DMG_PATH}"
 hdiutil verify "${DMG_PATH}"
-shasum -a 256 "${DMG_PATH}" > "${DMG_PATH}.sha256"
+(
+    cd "${OUTPUT_DIR}"
+    shasum -a 256 "$(basename "${DMG_PATH}")" > "$(basename "${DMG_PATH}").sha256"
+)
 
 echo "Signed, notarized, and stapled: ${DMG_PATH}"
 echo "No release was published."

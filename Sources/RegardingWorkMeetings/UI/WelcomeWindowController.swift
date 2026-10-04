@@ -359,7 +359,12 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
     private func refresh() {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
-            setStatus(microphoneStatus, "Ready — microphone access allowed", color: .systemGreen)
+            let deviceName = DefaultAudioInputDevice.current()?.name ?? "default input"
+            setStatus(
+                microphoneStatus,
+                "Ready — recording from \(deviceName)",
+                color: .systemGreen
+            )
             microphoneButton.title = "Microphone Allowed"
             microphoneButton.isEnabled = false
         case .notDetermined:

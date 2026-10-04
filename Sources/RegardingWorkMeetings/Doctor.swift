@@ -28,7 +28,8 @@ enum DoctorReport {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized:
-            return Check(name: "microphone", status: .ok, remediation: nil)
+            let name = DefaultAudioInputDevice.current()?.name ?? "default input unavailable"
+            return Check(name: "microphone (\(name))", status: .ok, remediation: nil)
         case .notDetermined:
             return Check(
                 name: "microphone",
