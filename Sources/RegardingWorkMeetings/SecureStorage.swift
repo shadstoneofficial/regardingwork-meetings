@@ -1,8 +1,16 @@
 import Foundation
+import Darwin
 
 enum SecureStorage {
     static let directoryMode: Int = 0o700
     static let fileMode: Int = 0o600
+
+    /// Atomically reserve a new audio path. Never truncate a recording or follow a symlink.
+    static func reserveNewFile(_ url: URL) throws {
+        let descriptor = open(url.path, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, mode_t(fileMode))
+        guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        close(descriptor)
+    }
 
     static func createDirectory(_ url: URL) throws {
         try FileManager.default.createDirectory(

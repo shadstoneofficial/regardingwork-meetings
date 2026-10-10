@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+import os.lock
 @testable import RegardingWorkMeetings
 
 private actor FixtureEngine: TranscriptionEngine {
@@ -160,6 +161,135 @@ struct TranscriptionCoordinatorTests {
             _ = try AVAudioFile(forWriting: url, settings: format.settings)
         }
         #expect(AudioAvailability.inspect(url) == .empty)
+    }
+
+    @Test("all restarted system segments transcribe at their original times with a capture warning")
+    func segmentedCapture() async throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = try session(root, name: "segmented")
+        var metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: directory.appendingPathComponent("meta.json")))
+        metadata.system_audio_segments = [
+            AudioCaptureSegment(file: "system.caf", started_at: metadata.started, offset_ms: 0,
+                frames_written: 100, capture_started: true),
+            AudioCaptureSegment(file: "system.recovery-001.caf", started_at: "2026-10-04T00:00:30Z",
+                offset_ms: 30_000, frames_written: 100, capture_started: true),
+            AudioCaptureSegment(file: "system.recovery-002.caf", started_at: "2026-10-04T00:00:40Z",
+                offset_ms: 40_000, capture_started: false, failure: "synthetic start failed")
+        ]
+        metadata.system_capture_interruptions = [CaptureInterruption(started_at: "2026-10-04T00:00:10Z",
+            detected_at: "2026-10-04T00:00:26Z", reason: "stalled", resumed_at: "2026-10-04T00:00:30Z")]
+        try SessionFileWriter.writeMetadata(metadata, to: directory)
+        try SecureStorage.write(Data("synthetic segment".utf8), to: directory.appendingPathComponent("system.recovery-001.caf"))
+        let original = try Data(contentsOf: directory.appendingPathComponent("system.caf"))
+        let engine = FixtureEngine()
+        let runner = coordinator(engine)
+        await runner.enqueue(directory)
+        try await wait(runner)
+        let result = try transcript(directory)
+        #expect(result.segments.map(\.start_ms) == [0, 0, 30_000])
+        #expect(result.segments.map(\.speaker) == ["me", "them", "them"])
+        #expect(result.capture_incomplete == true)
+        #expect(result.warnings.contains { $0.contains("capture gap") })
+        #expect(result.warnings.contains { $0.contains("empty attempt preserved") })
+        #expect(result.rendered(title: "synthetic").contains("RECORDING MAY BE INCOMPLETE"))
+        #expect(await engine.calls("system.recovery-001.caf") == 1)
+        #expect(await engine.calls("system.recovery-002.caf") == 0)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("system.caf")) == original)
+    }
+
+    @Test("a missing restarted segment remains unfinished and only that segment is retried")
+    func segmentedRetry() async throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = try session(root, name: "segment-retry")
+        var metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: directory.appendingPathComponent("meta.json")))
+        metadata.system_audio_segments = [
+            AudioCaptureSegment(file: "system.caf", started_at: metadata.started, offset_ms: 0, capture_started: true),
+            AudioCaptureSegment(file: "system.recovery-001.caf", started_at: metadata.started,
+                offset_ms: 20_000, capture_started: true)
+        ]
+        try SessionFileWriter.writeMetadata(metadata, to: directory)
+        let engine = FixtureEngine()
+        let runner = coordinator(engine, inspect: { url in
+            FileManager.default.fileExists(atPath: url.path) ? .readable : .missing
+        })
+        await runner.enqueue(directory)
+        try await wait(runner)
+        #expect(!exists(directory, "transcript.json"))
+        #expect(try readProgress(directory).tracks.map(\.outcome) == [.transcribed, .transcribed, .missing])
+        try SecureStorage.write(Data("synthetic repaired file".utf8), to: directory.appendingPathComponent("system.recovery-001.caf"))
+        #expect(await runner.retryPending(roots: [root]) == 1)
+        try await wait(runner)
+        #expect(exists(directory, "transcript.json"))
+        #expect(await engine.calls("mic.caf") == 1)
+        #expect(await engine.calls("system.caf") == 1)
+        #expect(await engine.calls("system.recovery-001.caf") == 1)
+    }
+
+    @Test("invalid or duplicated segment paths and negative offsets are refused")
+    func invalidSegments() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = try session(root, name: "invalid-segments")
+        var metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: directory.appendingPathComponent("meta.json")))
+        for segments in [
+            [AudioCaptureSegment(file: "../other.caf", started_at: metadata.started, offset_ms: 0)],
+            [AudioCaptureSegment(file: "system.caf", started_at: metadata.started, offset_ms: -1)],
+            [AudioCaptureSegment(file: "mic.caf", started_at: metadata.started, offset_ms: 0, capture_started: true)],
+            [AudioCaptureSegment(file: "system.caf", started_at: metadata.started, offset_ms: 0, capture_started: true),
+             AudioCaptureSegment(file: "system.caf", started_at: metadata.started, offset_ms: 0, capture_started: true)]
+        ] {
+            metadata.system_audio_segments = segments
+            try SessionFileWriter.writeMetadata(metadata, to: directory)
+            #expect(throws: (any Error).self) { try SessionMeta.read(from: directory) }
+        }
+    }
+
+    @Test("successful inference after capture loss never sends an unqualified ready notification")
+    func captureCompletionStatus() async throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = try session(root, name: "capture-loss")
+        var metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: directory.appendingPathComponent("meta.json")))
+        metadata.track_health_history = ["system": [TrackHealthObservation(observed_at: metadata.started,
+            health: TrackHealth(state: .stalled, detail: "synthetic stall"))]]
+        try SessionFileWriter.writeMetadata(metadata, to: directory)
+        let events = OSAllocatedUnfairLock(initialState: (titles: [String](), statuses: [TranscriptionCoordinator.Status]()))
+        let engine = FixtureEngine()
+        let runner = TranscriptionCoordinator(engineFactory: { engine }, inspectAudio: { _ in .readable },
+            enabled: { true }, notification: { title, _ in events.withLock { $0.titles.append(title) } },
+            completionHook: { _ in })
+        await runner.setStatusHandler { status in events.withLock { $0.statuses.append(status) } }
+        await runner.enqueue(directory)
+        try await wait(runner)
+        #expect(events.withLock { $0.titles.contains { $0.contains("recording may be incomplete") } })
+        #expect(!events.withLock { $0.titles.contains { $0.hasSuffix("transcript ready") } })
+        if case .captureIncomplete(let name) = events.withLock({ $0.statuses.last }) {
+            #expect(name == "capture-loss")
+        } else {
+            Issue.record("capture loss was incorrectly presented as idle or unfinished inference")
+        }
+        #expect(exists(directory, "transcript.json"))
+        #expect(try transcript(directory).capture_incomplete == true)
+    }
+
+    @Test("ordinary quiet warnings alone do not assert capture loss")
+    func quietCaptureWarning() throws {
+        let root = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = try session(root, name: "quiet-capture")
+        var metadata = try JSONDecoder().decode(SessionMetadata.self,
+            from: Data(contentsOf: directory.appendingPathComponent("meta.json")))
+        metadata.track_health_history = ["system": [TrackHealthObservation(observed_at: metadata.started,
+            health: TrackHealth(state: .silent, detail: "quiet with fresh buffers"))]]
+        try SessionFileWriter.writeMetadata(metadata, to: directory)
+        #expect(try SessionMeta.read(from: directory).captureIncomplete == false)
+        #expect(try SessionMeta.read(from: directory).trackWarnings.contains { $0.contains("silent") })
     }
 
     private func coordinator(_ engine: FixtureEngine,

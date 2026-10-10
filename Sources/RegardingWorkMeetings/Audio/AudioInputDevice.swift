@@ -8,9 +8,11 @@ struct AudioInputDeviceIdentity: Codable, Equatable, Sendable {
 }
 
 enum DefaultAudioInputDevice {
-    static func current() -> AudioInputDeviceIdentity? {
+    static func current(
+        selector: AudioObjectPropertySelector = kAudioHardwarePropertyDefaultInputDevice
+    ) -> AudioInputDeviceIdentity? {
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mSelector: selector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
@@ -56,5 +58,11 @@ enum DefaultAudioInputDevice {
             &value
         ) == noErr, let value else { return nil }
         return value.takeUnretainedValue() as String
+    }
+}
+
+enum DefaultAudioOutputDevice {
+    static func current() -> AudioInputDeviceIdentity? {
+        DefaultAudioInputDevice.current(selector: kAudioHardwarePropertyDefaultOutputDevice)
     }
 }

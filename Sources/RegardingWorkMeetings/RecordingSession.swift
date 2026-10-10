@@ -8,13 +8,16 @@ final class RecordingSession {
 
     private let sessionID = UUID().uuidString
     private let mic = MicRecorder()
-    private let system = SystemAudioRecorder()
+    private let system: SystemCaptureController
     private var lastManifestWrite = Date.distantPast
     private var routeHistory = MicrophoneRouteHistory()
+    private var outputRouteHistory = MicrophoneRouteHistory()
     private var currentMicrophone: AudioInputDeviceIdentity?
     private var healthHistory: [String: [TrackHealthObservation]] = [:]
+    private var lastHealth: [String: TrackHealth] = [:]
 
     var microphoneDeviceName: String? { currentMicrophone?.name }
+    var systemWasInterrupted: Bool { system.wasInterrupted }
 
     private static let folderFormat: DateFormatter = {
         let formatter = DateFormatter()
@@ -35,6 +38,11 @@ final class RecordingSession {
         }
         try SecureStorage.createDirectory(candidate)
         dir = candidate
+        system = SystemCaptureController(directory: candidate, startedAt: now)
+        system.beforeCapture = { [weak self] in
+            guard let self else { throw CocoaError(.fileWriteUnknown) }
+            try self.writeManifest(health: self.lastHealth.isEmpty ? self.initialHealth() : self.lastHealth)
+        }
     }
 
     /// Writes the crash-recovery sidecar before capture starts, then starts
@@ -43,7 +51,7 @@ final class RecordingSession {
     func start() throws {
         try writeManifest(health: initialHealth())
         do {
-            try system.start(writingTo: audioURL("system"))
+            try system.start()
             try mic.start(writingTo: audioURL("mic"))
             routeHistory.observe(mic.deviceAtStart, at: startedAt)
         } catch {
@@ -64,9 +72,10 @@ final class RecordingSession {
     /// Current health is safe to display while recording. A track is only
     /// active when both buffers and an audible signal have been observed.
     @discardableResult
-    func health(now: Date = Date(), persist: Bool = true) -> [String: TrackHealth] {
+    func health(now: Date = Date(), persist: Bool = true, allowRecovery: Bool = true) -> [String: TrackHealth] {
         currentMicrophone = DefaultAudioInputDevice.current()
         routeHistory.observe(currentMicrophone, at: now)
+        outputRouteHistory.observe(DefaultAudioOutputDevice.current(), at: now)
         var micHealth = TrackHealthEvaluator.evaluate(
             snapshot: mic.snapshot(),
             sessionStartedAt: startedAt,
@@ -86,18 +95,16 @@ final class RecordingSession {
         }
         let result = [
             "mic": micHealth,
-            "system": TrackHealthEvaluator.evaluate(
-                snapshot: system.snapshot(),
-                sessionStartedAt: startedAt,
-                now: now
-            ),
+            "system": system.health(now: now, allowRecovery: allowRecovery),
         ]
+        let changed = result != lastHealth
+        lastHealth = result
         for (track, health) in result where healthHistory[track]?.last?.health != health {
             healthHistory[track, default: []].append(TrackHealthObservation(
                 observed_at: ISO8601DateFormatter().string(from: now), health: health
             ))
         }
-        if persist, now.timeIntervalSince(lastManifestWrite) >= 5 {
+        if persist, changed || now.timeIntervalSince(lastManifestWrite) >= 5 {
             try? writeManifest(health: result)
             lastManifestWrite = now
         }
@@ -109,7 +116,7 @@ final class RecordingSession {
     /// deliberately left in place for recovery.
     @discardableResult
     func stop(now: Date = Date()) -> SessionMetadata {
-        let finalHealth = health(now: now, persist: false)
+        let finalHealth = health(now: now, persist: false, allowRecovery: false)
         mic.stop()
         system.stop()
         return finalize(endedAt: now, health: finalHealth, recoveryNote: nil)
@@ -145,15 +152,23 @@ final class RecordingSession {
             microphone_configuration_restarts: mic.configurationRestartCount,
             preserved_zero_filled_mic: mic.preservedZeroFile,
             microphone_route_history: routeHistory.observations,
-            track_health_history: healthHistory
+            track_health_history: healthHistory,
+            system_audio_segments: system.segments(origin: earliest),
+            system_capture_interruptions: system.interruptions,
+            system_recovery_attempts: system.recoveryAttempts,
+            system_output_route_history: outputRouteHistory.observations,
+            app_build: AppBuildInfo.current(),
+            macos_version: ProcessInfo.processInfo.operatingSystemVersionString,
+            first_buffer_at: bufferTimes(first: true),
+            last_buffer_at: bufferTimes(first: false)
         )
         do {
             try SessionFileWriter.writeMetadata(metadata, to: dir)
             try? FileManager.default.removeItem(
                 at: dir.appendingPathComponent(SessionFileWriter.manifestName)
             )
-            for track in ["mic", "system"] {
-                try? SecureStorage.protectFile(audioURL(track))
+            for file in ["mic.caf"] + system.segments(origin: earliest).map(\.file) {
+                try? SecureStorage.protectFile(dir.appendingPathComponent(file))
             }
         } catch {
             FileHandle.standardError.write(
@@ -165,12 +180,7 @@ final class RecordingSession {
 
     private func writeManifest(health: [String: TrackHealth]) throws {
         let iso = ISO8601DateFormatter()
-        var firstBuffers: [String: String] = [:]
-        if let first = mic.firstBufferAt { firstBuffers["mic"] = iso.string(from: first) }
-        if let first = system.firstBufferAt { firstBuffers["system"] = iso.string(from: first) }
-        var lastBuffers: [String: String] = [:]
-        if let last = mic.snapshot().lastBufferAt { lastBuffers["mic"] = iso.string(from: last) }
-        if let last = system.snapshot().lastBufferAt { lastBuffers["system"] = iso.string(from: last) }
+        let earliest = min(mic.firstBufferAt ?? startedAt, system.firstBufferAt ?? startedAt)
         let manifest = RecordingManifest(
             schema_version: 1,
             state: "in_progress",
@@ -178,16 +188,22 @@ final class RecordingSession {
             owner_pid: getpid(),
             started_at: iso.string(from: startedAt),
             files: ["mic": "mic.caf", "system": "system.caf"],
-            first_buffer_at: firstBuffers,
+            first_buffer_at: bufferTimes(first: true),
             track_health: health,
             microphone_device: mic.deviceAtStart,
             microphone_recovery_attempted: mic.digitalSilenceRecoveryAttempted,
             microphone_configuration_restarts: mic.configurationRestartCount,
             preserved_zero_filled_mic: mic.preservedZeroFile,
-            last_buffer_at: lastBuffers,
+            last_buffer_at: bufferTimes(first: false),
             microphone_device_at_capture: currentMicrophone,
             microphone_route_history: routeHistory.observations,
-            track_health_history: healthHistory
+            track_health_history: healthHistory,
+            system_audio_segments: system.segments(origin: earliest),
+            system_capture_interruptions: system.interruptions,
+            system_recovery_attempts: system.recoveryAttempts,
+            system_output_route_history: outputRouteHistory.observations,
+            app_build: AppBuildInfo.current(),
+            macos_version: ProcessInfo.processInfo.operatingSystemVersionString
         )
         try SessionFileWriter.writeManifest(manifest, to: dir)
     }
@@ -197,6 +213,16 @@ final class RecordingSession {
             "mic": TrackHealth(state: .starting, detail: "capture has not started"),
             "system": TrackHealth(state: .starting, detail: "capture has not started"),
         ]
+    }
+
+    private func bufferTimes(first: Bool) -> [String: String] {
+        var result: [String: String] = [:]
+        let microphone = first ? mic.firstBufferAt : mic.snapshot().lastBufferAt
+        let output = first ? system.firstBufferAt : system.lastBufferAt
+        let iso = ISO8601DateFormatter()
+        if let microphone { result["mic"] = iso.string(from: microphone) }
+        if let output { result["system"] = iso.string(from: output) }
+        return result
     }
 
     private func audioURL(_ track: String) -> URL {

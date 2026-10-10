@@ -1,6 +1,6 @@
 # RegardingWork Meetings
 
-RegardingWork Meetings is a private, fully local macOS meeting recorder and
+RegardingWork Meetings is an open-source, fully local macOS meeting recorder and
 transcriber in the RegardingWork Voice product family. A deliberate menu-bar
 action captures the default microphone and all Mac system audio as separate
 CAF tracks, then runs Parakeet transcription on-device. Audio and transcripts
@@ -54,14 +54,27 @@ legacy recording roots and queues sessions with `meta.json` but no completed
 `transcript.json`. Existing completed transcripts and original CAF audio are
 left unchanged.
 
-Known limitation: a failed individual track can still produce `transcript.json`
-and be skipped by retry. Check both sources and transcript warnings; correcting
-partial-completion handling is in the improvement plan.
+Since 0.1.4, failed/missing/unreadable tracks remain unfinished and retryable;
+successful track output is checkpointed. A completed transcript means inference
+finished for the captured sources, **not** that recording was complete.
+The 0.1.5 beta candidate labels known capture failures/gaps prominently in the
+menu, notification, Markdown and JSON (`capture_incomplete`). Retrying cannot
+restore audio that was never recorded.
+
+The 0.1.5 candidate also shows **SYS!** for a stalled/failed/restarting system
+track, **CHECK SYS** for startup/quiet, and **SYS GAP** after an interruption,
+even if new audio resumes. It can rebuild a stalled tap up to three times while
+the visible recording is active, preserving earlier audio in separate CAFs.
+Ordinary quiet does not trigger recovery. See
+[SYSTEM_AUDIO_RELIABILITY.md](SYSTEM_AUDIO_RELIABILITY.md) for limitations and
+the required real-Mac test matrix. Use **About RegardingWork Meetings…** or the
+version line in the menu to check the exact app version/build.
 
 At recording start, **CHECK MIC** remains beside the red recording symbol until
 the input produces a nonzero sample. That alone does not prove speech capture.
-The menu names the microphone selected at session start; after a route change
-that label can be stale. **MIC!** means digital silence, a stalled/failed input,
+The menu names the current macOS default microphone. This is the selected
+route, not proof of audible speech; inspect the separate health indication.
+**MIC!** means digital silence, a stalled/failed input,
 or a route change needs immediate attention. See
 [MICROPHONE_RELIABILITY.md](MICROPHONE_RELIABILITY.md).
 
@@ -76,6 +89,7 @@ Each completed session can contain:
 |---|---|
 | `mic.caf` | Local microphone; transcript source label `me` |
 | `system.caf` | Everything the Mac played; source label `them` |
+| `system.recovery-NNN.caf` | Preserved system capture after a safe tap restart; included at its original offset |
 | `meta.json` | Timing, source attribution, recovery, and final track health |
 | `mic.zero-filled.caf` | Preserved diagnostic evidence after automatic zero-input recovery |
 | `transcript.json` | Canonical transcript, including preserved echo candidates |

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.5 Beta Candidate (build 6) - 2026-10-10
+
+- Detect system stalls/incompatible buffers and attempt at most three safe tap
+  rebuilds during an already visible recording. Quiet with live buffers does
+  not restart; storage write failures halt instead of looping.
+- Finalize and preserve each earlier CAF. New capture uses exclusively reserved
+  numbered system files and records them before capture begins. Stop/quit
+  cancels pending recovery; callbacks cannot write into a closed/new segment.
+- Merge all captured system segments at their original offsets, preserve failed
+  attempts, and keep unavailable started segments retryable. Recovery includes
+  every registered segment and preserves the original sidecar.
+- Display persistent SYS!, CHECK SYS and SYS GAP labels beside the red recording
+  indicator. Distinguish successful inference from potentially incomplete
+  capture in the menu, notification, Markdown banner and canonical JSON.
+- Add About/version menu and app build/source, macOS version, output route
+  history, successful-buffer endpoints, frame counts and capture gaps to private
+  metadata/manifests. Correct interleaved system-buffer signal detection.
+- Add synthetic long-session stall, bounded recovery/cancellation, preservation,
+  permissions, segmented inference/retry/recovery and warning/version tests.
+- Keep local Parakeet, AAC-in-CAF, original audio, attribution, privacy/consent,
+  retention and playback-echo defaults unchanged. Real route/long-meeting,
+  permission, inference and abrupt-exit tests remain mandatory before trust.
+  This is an unmerged beta candidate, not a stable/reliability guarantee.
+
 ## 0.1.4 Beta Candidate (build 5) - 2026-10-04
 
 - Keep failed inference, missing, empty and unreadable audio unfinished and
@@ -19,7 +43,8 @@
   external build/temp storage and embed the exact source commit in the app.
 - Preserve AAC-in-CAF, local Parakeet and existing playback-echo defaults. Abruptly
   interrupted AAC can still be unreadable; real-device/inference/crash testing
-  remains mandatory. This candidate is unmerged and not a stable release.
+  remains mandatory. Published as a prerelease and source merged on 2026-10-10;
+  it is not a stable release.
 
 ## Unreleased
 

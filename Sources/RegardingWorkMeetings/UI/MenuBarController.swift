@@ -4,16 +4,19 @@ enum MenuBarActivity: Equatable {
     case idle
     case transcribing
     case transcriptionFailed
+    case captureIncomplete
     case recording
 
     static func resolve(
         recording: Bool,
         transcriptionVisible: Bool,
-        transcriptionFailed: Bool
+        transcriptionFailed: Bool,
+        captureIncomplete: Bool = false
     ) -> Self {
         if recording { return .recording }
         if transcriptionFailed { return .transcriptionFailed }
         if transcriptionVisible { return .transcribing }
+        if captureIncomplete { return .captureIncomplete }
         return .idle
     }
 }
@@ -28,6 +31,7 @@ final class MenuBarController {
     private let healthLabel: NSMenuItem
     private let recoveryLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
+    private let captureWarningLabel: NSMenuItem
     private let retryTranscriptionItem: NSMenuItem
     private let toggleItem: NSMenuItem
     private var recording = false
@@ -54,6 +58,11 @@ final class MenuBarController {
         healthLabel.isHidden = true
         menu.addItem(healthLabel)
 
+        captureWarningLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        captureWarningLabel.isEnabled = false
+        captureWarningLabel.isHidden = true
+        menu.addItem(captureWarningLabel)
+
         recoveryLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         recoveryLabel.isEnabled = false
         recoveryLabel.isHidden = true
@@ -72,6 +81,13 @@ final class MenuBarController {
         menu.addItem(retryTranscriptionItem)
 
         menu.addItem(.separator())
+
+        let about = NSMenuItem(title: "About \(AppIdentity.productName)…",
+            action: #selector(aboutClicked), keyEquivalent: "")
+        menu.addItem(about)
+        let version = NSMenuItem(title: AppBuildInfo.current().display, action: nil, keyEquivalent: "")
+        version.isEnabled = false
+        menu.addItem(version)
 
         let setup = NSMenuItem(
             title: "Welcome & Setup…",
@@ -103,7 +119,7 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [retryTranscriptionItem, setup, toggleItem, openFolder, quit] {
+        for item in [about, retryTranscriptionItem, setup, toggleItem, openFolder, quit] {
             item.target = self
         }
 
@@ -140,7 +156,8 @@ final class MenuBarController {
         let activity = MenuBarActivity.resolve(
             recording: recording,
             transcriptionVisible: !transcriptionLabel.isHidden,
-            transcriptionFailed: transcriptionFailed
+            transcriptionFailed: transcriptionFailed,
+            captureIncomplete: !captureWarningLabel.isHidden
         )
         let button = statusItem.button
         switch activity {
@@ -175,6 +192,13 @@ final class MenuBarController {
             button?.setAccessibilityLabel(
                 "\(AppIdentity.productName) — transcription needs attention"
             )
+        case .captureIncomplete:
+            let configuration = NSImage.SymbolConfiguration(paletteColors: [.systemOrange])
+            button?.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill",
+                accessibilityDescription: "Recording may be incomplete")?.withSymbolConfiguration(configuration)
+            button?.image?.isTemplate = false
+            button?.toolTip = "\(AppIdentity.productName) — recording may be incomplete; inspect capture warnings"
+            button?.setAccessibilityLabel(button?.toolTip)
         case .idle:
             button?.image = Self.regardingWorkImage()
             button?.image?.isTemplate = true
@@ -185,7 +209,8 @@ final class MenuBarController {
 
     func updateHealth(
         _ health: [String: TrackHealth],
-        microphoneName: String? = nil
+        microphoneName: String? = nil,
+        systemInterrupted: Bool = false
     ) {
         guard let mic = health["mic"], let system = health["system"] else {
             healthLabel.isHidden = true
@@ -194,8 +219,9 @@ final class MenuBarController {
         let device = microphoneName.map { " · \($0)" } ?? ""
         healthLabel.title = "mic \(mic.menuText)\(device) · system \(system.menuText)"
         healthLabel.isHidden = false
-        statusItem.button?.title = MicrophoneSafety.menuBarLabel(for: mic.state)
-        let microphoneStatus = "\(AppIdentity.productName) — mic \(mic.menuText)\(device)"
+        statusItem.button?.title = CaptureWarningLabel.text(mic: mic.state,
+            system: system.state, systemInterrupted: systemInterrupted)
+        let microphoneStatus = "\(AppIdentity.productName) — mic \(mic.menuText)\(device); system \(system.menuText): \(system.detail)"
         statusItem.button?.toolTip = microphoneStatus
         statusItem.button?.setAccessibilityLabel(microphoneStatus)
     }
@@ -203,6 +229,13 @@ final class MenuBarController {
     func updateRecovery(_ text: String?) {
         recoveryLabel.title = text.map { "recovery: \($0)" } ?? ""
         recoveryLabel.isHidden = text == nil
+    }
+
+    func updateCaptureWarning(_ text: String?) {
+        captureWarningLabel.title = text.map { "⚠︎ \($0)" } ?? ""
+        captureWarningLabel.isHidden = text == nil
+        if !recording { stateLabel.title = idleStateTitle() }
+        updateStatusIcon()
     }
 
     /// Show transcription progress/failure as a second status line in the
@@ -226,6 +259,7 @@ final class MenuBarController {
     private func idleStateTitle() -> String {
         if transcriptionFailed { return "transcription needs attention" }
         if !transcriptionLabel.isHidden { return "transcribing locally…" }
+        if !captureWarningLabel.isHidden { return "recording may be incomplete" }
         return "idle"
     }
 
@@ -251,6 +285,15 @@ final class MenuBarController {
     }
 
     @objc private func toggleClicked() { onToggle?() }
+    @objc private func aboutClicked() {
+        let alert = NSAlert()
+        alert.messageText = AppIdentity.productName
+        let build = AppBuildInfo.current()
+        alert.informativeText = "Version \(build.display)\nSource: \(build.source_commit ?? "development / unavailable")\n\nLocal microphone=me and Mac system audio=them. These are source tracks, not speaker diarization. Inspect capture warnings before trusting a transcript."
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
     @objc private func showSetupClicked() { onShowSetup?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func retryTranscriptionsClicked() {
