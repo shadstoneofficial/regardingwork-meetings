@@ -4,7 +4,7 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_VERSION="${APP_VERSION:-0.1.4}"
+APP_VERSION="${APP_VERSION:-0.1.5}"
 OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_ROOT}/dist}"
 APP_PATH="${APP_PATH:-${OUTPUT_DIR}/RegardingWork Meetings.app}"
 DMG_PATH="${OUTPUT_DIR}/RegardingWork-Meetings-${APP_VERSION}.dmg"
@@ -95,7 +95,7 @@ if [[ -n "${EXPECTED_SOURCE_COMMIT:-}" && "$(git rev-parse HEAD)" != "${EXPECTED
     echo "Source commit does not match EXPECTED_SOURCE_COMMIT." >&2
     exit 1
 fi
-APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-5}" \
+APP_VERSION="${APP_VERSION}" BUILD_NUMBER="${BUILD_NUMBER:-6}" \
     SKIP_CODESIGN=1 OUTPUT_DIR="${OUTPUT_DIR}" scripts/build-app.sh
 
 [[ "$(plutil -extract RWSourceCommit raw -o - "${APP_PATH}/Contents/Info.plist")" == "$(git rev-parse HEAD)" ]]

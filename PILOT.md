@@ -28,7 +28,7 @@ menu command remains available.
 ## Install an unsigned development build
 
 ```sh
-git switch codex/reliability-beta-014
+git switch codex/system-capture-recovery-015
 swift test
 scripts/build-app.sh
 open "dist/RegardingWork Meetings.app"
@@ -95,6 +95,14 @@ Also complete the device and zero-filled-buffer matrix in
 clears only after a real sample, the actual default input name is visible, and
 **MIC!** persists after an unsuccessful single recovery attempt.
 
+For the 0.1.5 candidate, complete
+[SYSTEM_AUDIO_RELIABILITY.md](SYSTEM_AUDIO_RELIABILITY.md): record at least
+90 minutes, change USB/Bluetooth/built-in input and output routes, hold the
+menu open, and compare both tracks throughout the session. Confirm **SYS!**
+for stalls/recovery, **CHECK SYS** for quiet and **SYS GAP** after resume.
+Stop during a scheduled recovery and prove no capture restarts afterward.
+Check About/the menu version line against `app_build` in `meta.json`.
+
 ## Transcript verification
 
 Compare several timestamps against both CAF tracks. Verify source attribution,
@@ -156,15 +164,15 @@ security find-identity -v -p codesigning
 xcrun notarytool history --keychain-profile "<profile>"
 SIGNING_IDENTITY="Developer ID Application: …" \
 NOTARY_PROFILE="<profile>" \
-APP_VERSION="0.1.4" \
-BUILD_NUMBER="5" \
+APP_VERSION="0.1.5" \
+BUILD_NUMBER="6" \
 scripts/sign-and-notarize.sh
 ```
 
 The script builds, signs with hardened runtime, verifies, submits with bounded
 polling, fetches failure logs, staples, assesses Gatekeeper, creates and
 notarizes the DMG, verifies it, and writes SHA-256. Expected artifact:
-`dist/RegardingWork-Meetings-0.1.4.dmg`. Do not publish until both app and DMG
+`dist/RegardingWork-Meetings-0.1.5.dmg`. Do not publish until both app and DMG
 verification pass. This repository does not publish automatically.
 
 Signing refuses dirty source and supports `EXPECTED_SOURCE_COMMIT`. On Janice's

@@ -13,6 +13,12 @@ At session start, the app atomically writes `recording.json` with a session ID,
 owner PID, expected tracks, start time, first-buffer times, and recent health.
 Version 0.1.4 also records persisted last-buffer timestamps, observed health
 changes and microphone route history as private session evidence.
+The 0.1.5 candidate adds app version/build/source, macOS version, observed
+default output routes, system recovery attempts, interruption timestamps and
+an ordered `system_audio_segments` table. Each restarted system segment is
+registered in the manifest before capture starts. Final metadata includes
+first/last successful buffer timestamps; "last" means a successful write,
+not a callback that arrived with zero frames or failed to write.
 On clean stop it writes `meta.json` first and then removes the in-progress
 manifest.
 
@@ -23,6 +29,7 @@ At relaunch, the app scans the current recordings root. When the new default
 1. A manifest whose owner PID still appears active is deferred.
 2. Malformed manifests are preserved and reported.
 3. Each expected track is checked for readable audio frames.
+   In 0.1.5 this includes every registered system segment, not just `system.caf`.
 4. If at least one track is readable, recovered `meta.json` is written without
    overwriting existing metadata.
 5. The original sidecar is preserved as `recording.recovered.json`.
@@ -58,6 +65,39 @@ but waiting for completion before shutdown is safest.
 Choose **Retry unfinished transcriptions** from the menu to perform the same
 safe scan without restarting the app. This can be used after a temporary model
 or Core ML failure while later meetings continue through the serial queue.
+
+## System capture interruption during a live recording (0.1.5 candidate)
+
+The common-mode watchdog distinguishes ordinary quiet with fresh buffers from
+stopped buffers. More than 15 seconds without a successful system write (or
+more than 5 seconds without a first buffer) is a stall. An incompatible buffer
+can also trigger recovery. There are at most three automatic attempts per
+session, with 2/4/8-second delays. Recovery stops the old tap, finalizes its CAF,
+and starts a fresh tap/aggregate into a new `system.recovery-NNN.caf`. Existing
+files and symlinks are never overwritten. No scheduled restart survives Stop
+or Quit. Storage/write failures halt the track instead of making more files.
+
+During recovery the red recording symbol remains, with **SYS!** beside it;
+microphone capture continues independently. New buffers without recent audible
+signal still show **CHECK SYS**, not healthy. **SYS GAP** remains even after
+audible system capture resumes. Open the menu to see the microphone name and
+each track's health. Exhausted recovery requires a visible stop/save and new
+recording, not repeated app restarts as a normal workflow.
+
+The segment table retains source timing, first/last successful writes, frame
+counts, sample rate and failed-start evidence. Transcription processes every
+started segment separately and merges it at its offset; gaps are not collapsed.
+Known empty attempts that never started are preserved and explicitly warned,
+not endlessly sent to inference. Missing/unreadable **started** segments remain
+retryable. Readable audio overrides stale not-started metadata in recovery.
+Older two-file sessions remain compatible and existing final transcripts are
+not changed automatically.
+
+Capture gaps are approximate buffer-time intervals, not reconstructed speech.
+The menu and completion notification say the recording may be incomplete even
+when inference succeeds. Markdown has a prominent banner and JSON records
+`capture_incomplete: true`. These warnings cannot recover uncaptured audio.
+See [SYSTEM_AUDIO_RELIABILITY.md](SYSTEM_AUDIO_RELIABILITY.md).
 
 For manual inspection:
 
