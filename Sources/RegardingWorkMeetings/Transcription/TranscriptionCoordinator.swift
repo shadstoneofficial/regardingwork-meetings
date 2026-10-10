@@ -7,6 +7,7 @@ actor TranscriptionCoordinator {
         case idle
         case transcribing(session: String, queued: Int)
         case failed(session: String)
+        case captureIncomplete(session: String)
     }
 
     private var queue: [URL] = []
@@ -14,6 +15,7 @@ actor TranscriptionCoordinator {
     private var currentDirectory: URL?
     private var engine: TranscriptionEngine?
     private var lastFailure: String?
+    private var lastCaptureIssue: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
     private let engineFactory: @Sendable () -> any TranscriptionEngine
     private let inspectAudio: @Sendable (URL) -> AudioAvailability
@@ -134,8 +136,11 @@ actor TranscriptionCoordinator {
                     currentDirectory = nil
                     continue
                 }
-                try await transcribe(directory)
-                notification("\(AppIdentity.productName) — transcript ready", directory.lastPathComponent)
+                let captureIncomplete = try await transcribe(directory)
+                if captureIncomplete { lastCaptureIssue = directory.lastPathComponent }
+                notification("\(AppIdentity.productName) — " + (captureIncomplete
+                    ? "transcript saved; recording may be incomplete" : "transcript ready"),
+                    directory.lastPathComponent + (captureIncomplete ? " — inspect the capture warnings; retry cannot restore uncaptured audio" : ""))
                 completionHook(directory)
             } catch {
                 Self.log(directory, "transcription unfinished (\(String(reflecting: type(of: error)))); retry available")
@@ -147,12 +152,13 @@ actor TranscriptionCoordinator {
         }
         await engine?.release()
         engine = nil
-        publish(lastFailure.map { .failed(session: $0) } ?? .idle)
+        publish(lastFailure.map { .failed(session: $0) }
+            ?? lastCaptureIssue.map { .captureIncomplete(session: $0) } ?? .idle)
         draining = false
         drainIfIdle()
     }
 
-    private func transcribe(_ directory: URL) async throws {
+    private func transcribe(_ directory: URL) async throws -> Bool {
         let metadata = try SessionMeta.read(from: directory)
         guard !metadata.tracks.isEmpty else { throw TranscriptionProgress.ProgressError.changedSources }
         var progress = try TranscriptionProgress.load(directory: directory, sources: metadata.tracks)
@@ -223,7 +229,8 @@ actor TranscriptionCoordinator {
             created_at: ISO8601DateFormatter().string(from: Date()),
             attribution: "microphone=me and system=them are source tracks, not multi-speaker diarization",
             warnings: warnings,
-            segments: merged
+            segments: merged,
+            capture_incomplete: metadata.captureIncomplete
         )
         progress.state = complete ? "complete" : (trackTranscripts.isEmpty ? "failed" : "partial")
         try progress.write(to: directory)
@@ -234,6 +241,7 @@ actor TranscriptionCoordinator {
             "done — \(merged.count) segments, \(warnings.count) warning(s), "
                 + "\(duplicateResult.suppressedCount) high-confidence echo suppression(s)"
         )
+        return metadata.captureIncomplete
     }
 
     private func preparedEngine() async throws -> TranscriptionEngine {
@@ -324,6 +332,7 @@ struct SessionMeta: Equatable {
 
     let tracks: [Track]
     let trackWarnings: [String]
+    var captureIncomplete: Bool = false
 
     enum MetaError: Error, CustomStringConvertible {
         case unreadable(URL)
@@ -350,15 +359,36 @@ struct SessionMeta: Equatable {
                 Track(file: microphone, speaker: "me", offsetMs: offsets["mic"] ?? 0)
             )
         }
-        if let system = files["system"] {
+        var segmentWarnings: [String] = []
+        var captureIncomplete = false
+        if let rawSegments = json["system_audio_segments"] {
+            guard let segmentData = try? JSONSerialization.data(withJSONObject: rawSegments),
+                  let segments = try? JSONDecoder().decode([AudioCaptureSegment].self, from: segmentData),
+                  !segments.isEmpty,
+                  segments.allSatisfy({ validFilename($0.file) && $0.offset_ms >= 0 }),
+                  Set(segments.map(\.file)).count == segments.count,
+                  !segments.map(\.file).contains(files["mic"] ?? "")
+            else { throw MetaError.unreadable(url) }
+            for segment in segments {
+                // An unsuccessful start with no samples is evidence, not an
+                // inference job. Actual readable audio always wins over stale metadata.
+                let containsAudio = segment.capture_started || segment.frames_written > 0
+                    || segment.first_buffer_at != nil
+                    || AudioAvailability.inspect(directory.appendingPathComponent(segment.file)) == .readable
+                if containsAudio {
+                    tracks.append(Track(file: segment.file, speaker: "them", offsetMs: segment.offset_ms))
+                } else {
+                    segmentWarnings.append("\(segment.file): system capture never started; empty attempt preserved")
+                    captureIncomplete = true
+                }
+            }
+        } else if let system = files["system"] {
             tracks.append(
                 Track(file: system, speaker: "them", offsetMs: offsets["system"] ?? 0)
             )
         }
-        guard tracks.allSatisfy({
-            !$0.file.isEmpty && $0.file == URL(fileURLWithPath: $0.file).lastPathComponent
-                && !$0.file.hasPrefix(".")
-        }) else { throw MetaError.unreadable(url) }
+        guard tracks.allSatisfy({ validFilename($0.file) && $0.offsetMs >= 0 }),
+              Set(tracks.map(\.file)).count == tracks.count else { throw MetaError.unreadable(url) }
 
         var warnings: [String] = []
         if let health = json["track_health"] as? [String: [String: Any]] {
@@ -369,6 +399,7 @@ struct SessionMeta: Equatable {
                     !["active", "recovered"].contains(state)
                 else { continue }
                 warnings.append("\(track) track ended with \(state) health")
+                if lossStates.contains(state) { captureIncomplete = true }
             }
         }
         if let history = json["track_health_history"] as? [String: [[String: Any]]] {
@@ -376,13 +407,33 @@ struct SessionMeta: Equatable {
                 let states = (history[track] ?? []).compactMap { ($0["health"] as? [String: Any])?["state"] as? String }
                 for state in Set(states).sorted() where !["active", "recovered", "starting"].contains(state) {
                     warnings.append("\(track) track historically reported \(state) health")
+                    if lossStates.contains(state) { captureIncomplete = true }
                 }
             }
         }
         if json["preserved_zero_filled_mic"] as? String != nil {
             warnings.append("a zero-filled microphone attempt was preserved; inspect the original audio")
+            captureIncomplete = true
         }
-        return SessionMeta(tracks: tracks, trackWarnings: warnings)
+        if let interruptions = json["system_capture_interruptions"] as? [[String: Any]], !interruptions.isEmpty {
+            captureIncomplete = true
+            warnings.append("\(interruptions.count) system capture interruption(s); uncaptured audio cannot be restored by transcription retry")
+            for interruption in interruptions {
+                let start = interruption["started_at"] as? String ?? "unknown"
+                let end = interruption["resumed_at"] as? String ?? "resume timestamp unavailable; may not have resumed"
+                warnings.append("system capture gap: \(start) → \(end) (buffer timestamps; approximate)")
+            }
+        }
+        warnings += segmentWarnings
+        if captureIncomplete {
+            warnings.insert("RECORDING MAY BE INCOMPLETE: only captured audio is available; review the original tracks.", at: 0)
+        }
+        return SessionMeta(tracks: tracks, trackWarnings: warnings, captureIncomplete: captureIncomplete)
+    }
+
+    private static let lossStates: Set<String> = ["stalled", "failed", "missing", "digital_silence", "recovering"]
+    static func validFilename(_ file: String) -> Bool {
+        !file.isEmpty && !file.hasPrefix(".") && file == URL(fileURLWithPath: file).lastPathComponent
     }
 }
 
@@ -403,6 +454,7 @@ struct Transcript: Codable, Equatable {
     let attribution: String
     let warnings: [String]
     let segments: [Segment]
+    var capture_incomplete: Bool? = nil
 
     /// Markdown is written first and transcript.json last. The JSON file is
     /// the completion marker, so a Markdown failure remains retryable.
@@ -427,6 +479,9 @@ struct Transcript: Codable, Equatable {
         ]
         if partial {
             lines += ["> PARTIAL / UNFINISHED: successful track output is preserved; retry the unfinished tracks.", ""]
+        }
+        if capture_incomplete == true {
+            lines += ["> RECORDING MAY BE INCOMPLETE: capture gaps or failures were detected. Transcription cannot recover missing audio.", ""]
         }
         if !warnings.isEmpty {
             lines.append("## Recording and transcript warnings")

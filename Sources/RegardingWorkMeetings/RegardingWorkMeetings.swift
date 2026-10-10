@@ -181,7 +181,12 @@ final class AppController {
 
     private func stopSession() {
         guard let session else { return }
-        session.stop()
+        let metadata = session.stop()
+        if session.systemWasInterrupted || metadata.track_health.values.contains(where: {
+            [.stalled, .failed, .missing, .digitalSilence, .recovering].contains($0.state)
+        }) {
+            menuBar.updateCaptureWarning("Recording may be incomplete · \(session.dir.lastPathComponent) · inspect original audio")
+        }
         let elapsed = Self.format(Date().timeIntervalSince(session.startedAt))
         FileHandle.standardError.write(Data(
             "○ stopped · \(elapsed) · \(session.dir.path)\n".utf8
@@ -207,6 +212,9 @@ final class AppController {
             )
         case .failed(let name):
             menuBar.updateTranscription("transcription unfinished · \(name) · retry available", failed: true)
+        case .captureIncomplete(let name):
+            menuBar.updateTranscription(nil)
+            menuBar.updateCaptureWarning("Transcript saved; recording may be incomplete · \(name)")
         }
     }
 
@@ -224,8 +232,12 @@ final class AppController {
         let health = session.health()
         menuBar.updateHealth(
             health,
-            microphoneName: session.microphoneDeviceName
+            microphoneName: session.microphoneDeviceName,
+            systemInterrupted: session.systemWasInterrupted
         )
+        if session.systemWasInterrupted {
+            menuBar.updateCaptureWarning("System capture gap detected · previous audio preserved · inspect recording")
+        }
         for track in ["mic", "system"] {
             guard let current = health[track] else { continue }
             let previous = lastHealth[track]

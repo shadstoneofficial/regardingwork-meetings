@@ -8,6 +8,9 @@ struct RecorderSnapshot: Sendable {
     var lastNonzeroAt: Date?
     var zeroFilledSince: Date? = nil
     var failure: String?
+    var framesWritten: Int64 = 0
+    var sampleRate: Double? = nil
+    var retryableFailure: Bool = false
 }
 
 enum TrackHealthState: String, Codable, Sendable {
@@ -19,6 +22,7 @@ enum TrackHealthState: String, Codable, Sendable {
     case failed
     case routeChanged = "route_changed"
     case recovered
+    case recovering
     case missing
 }
 
@@ -31,6 +35,7 @@ struct TrackHealth: Codable, Equatable, Sendable {
         case .active: return "✓"
         case .starting: return "…"
         case .recovered: return "recovered"
+        case .recovering: return "restarting"
         case .silent: return "silent"
         case .digitalSilence: return "digital silence"
         case .stalled: return "stalled"
@@ -144,6 +149,25 @@ enum MicrophoneSafety {
         case .digitalSilence, .stalled, .failed, .routeChanged: return " MIC!"
         default: return ""
         }
+    }
+}
+
+/// Capture remains visibly active (red dot), but no failed track is hidden.
+enum CaptureWarningLabel {
+    static func text(mic: TrackHealthState, system: TrackHealthState, systemInterrupted: Bool) -> String {
+        var labels: [String] = []
+        let microphone = MicrophoneSafety.menuBarLabel(for: mic).trimmingCharacters(in: .whitespaces)
+        if !microphone.isEmpty { labels.append(microphone) }
+        switch system {
+        case .stalled, .failed, .missing, .digitalSilence, .routeChanged, .recovering:
+            labels.append("SYS!")
+        case .starting, .silent:
+            labels.append("CHECK SYS")
+        case .active, .recovered:
+            break
+        }
+        if systemInterrupted { labels.append("SYS GAP") }
+        return labels.isEmpty ? "" : " " + labels.joined(separator: " · ")
     }
 }
 

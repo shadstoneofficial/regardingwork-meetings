@@ -13,6 +13,9 @@ RegardingWork/
 Recordings/
 **/mic.caf
 **/system.caf
+*.caf
+**/meta.json
+**/transcribe.log
 **/transcript.json
 **/transcript.md
 **/transcript.partial.json

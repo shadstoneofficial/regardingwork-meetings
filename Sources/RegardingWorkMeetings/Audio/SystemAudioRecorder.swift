@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreAudio
 import Foundation
 import os.lock
@@ -8,7 +8,7 @@ import os.lock
 /// process's output to stereo and hands us buffers through a private aggregate
 /// device. First use triggers the one-time "System Audio Recording" TCC prompt
 /// and lights the purple recording indicator while active.
-final class SystemAudioRecorder: @unchecked Sendable {
+final class SystemAudioRecorder: SystemAudioRecording, @unchecked Sendable {
     enum RecorderError: Error, CustomStringConvertible {
         case tapCreationFailed(OSStatus)
         case tapFormatUnreadable(OSStatus)
@@ -34,7 +34,7 @@ final class SystemAudioRecorder: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private let queue = DispatchQueue(label: "\(AppIdentity.bundleIdentifier).system-tap")
-    private(set) var isRecording = false
+    private(set) var ownsOutputFile = false
 
     private struct LockedState {
         var file: AVAudioFile?
@@ -42,30 +42,43 @@ final class SystemAudioRecorder: @unchecked Sendable {
         var lastBufferAt: Date?
         var lastSignalAt: Date?
         var failure: String?
+        var acceptingBuffers = false
+        var framesWritten: Int64 = 0
+        var sampleRate: Double?
+        var retryableFailure = false
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
+
+    deinit { stop() }
 
     var firstBufferAt: Date? { state.withLock { $0.firstBufferAt } }
 
     func snapshot() -> RecorderSnapshot {
-        let recording = isRecording
         return state.withLock {
             RecorderSnapshot(
-                isRecording: recording,
+                isRecording: $0.acceptingBuffers,
                 firstBufferAt: $0.firstBufferAt,
                 lastBufferAt: $0.lastBufferAt,
                 lastSignalAt: $0.lastSignalAt,
                 lastNonzeroAt: $0.lastSignalAt,
                 zeroFilledSince: nil,
-                failure: $0.failure
+                failure: $0.failure,
+                framesWritten: $0.framesWritten,
+                sampleRate: $0.sampleRate,
+                retryableFailure: $0.retryableFailure
             )
         }
     }
 
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
     /// extension — interrupted AAC may still require finalization to decode).
-    func start(writingTo url: URL) throws {
-        guard !isRecording else { return }
+    func start(writingToNewFile url: URL, beforeCapture: () throws -> Void) throws {
+        precondition(!ownsOutputFile, "A system recorder must not reuse its output file")
+        // O_EXCL refuses an existing file or symlink. Only this reserved file
+        // can be opened by AVAudioFile, which otherwise truncates its target.
+        try SecureStorage.reserveNewFile(url)
+        ownsOutputFile = true
+        state.withLock { $0.retryableFailure = true } // Tap/device startup errors may recover.
 
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.name = "\(AppIdentity.productName) system tap"
@@ -82,20 +95,31 @@ final class SystemAudioRecorder: @unchecked Sendable {
             try createAggregateDevice(tapUUID: description.uuid)
             let file = try makeFile(url: url, format: format)
             try SecureStorage.protectFile(url)
-            state.withLock { $0.file = file }
+            state.withLock { $0.file = file; $0.sampleRate = format.sampleRate }
             try installIOProc(format: format)
+            // The session records the new filename before any callback can write.
+            try beforeCapture()
+            state.withLock { $0.acceptingBuffers = true }
+            let startStatus = AudioDeviceStart(aggregateID, procID)
+            guard startStatus == noErr else { throw RecorderError.deviceStartFailed(startStatus) }
+            state.withLock { if $0.failure == nil { $0.retryableFailure = false } }
         } catch {
-            cleanup()
+            let retryable: Bool
+            if let recorderError = error as? RecorderError {
+                if case .fileCreationFailed = recorderError { retryable = false }
+                else { retryable = true }
+            } else {
+                retryable = false // Includes failure to persist the session manifest.
+            }
+            state.withLock { $0.retryableFailure = retryable }
+            stop()
             throw error
         }
-
-        isRecording = true
     }
 
     /// Stop capturing and finalize the file. Idempotent.
     func stop() {
-        guard isRecording else { return }
-        isRecording = false
+        state.withLock { $0.acceptingBuffers = false }
         if let procID, aggregateID != kAudioObjectUnknown {
             AudioDeviceStop(aggregateID, procID)
         }
@@ -159,34 +183,42 @@ final class SystemAudioRecorder: @unchecked Sendable {
     }
 
     private func installIOProc(format: AVAudioFormat) throws {
-        var status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
+        let status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
             [weak self] _, inInputData, _, _, _ in
             guard let self else { return }
             guard let buffer = AVAudioPCMBuffer(
                 pcmFormat: format,
                 bufferListNoCopy: inInputData,
                 deallocator: nil
-            ) else { return }
-            do {
-                let now = Date()
-                let hasSignal = Self.hasSignal(buffer)
-                guard let file = self.state.withLock({ $0.file }) else { return }
-                try file.write(from: buffer)
+            ) else {
                 self.state.withLock {
-                    if $0.firstBufferAt == nil { $0.firstBufferAt = now }
-                    $0.lastBufferAt = now
-                    if hasSignal { $0.lastSignalAt = now }
+                    guard $0.acceptingBuffers else { return }
+                    $0.failure = "system tap delivered an incompatible audio buffer"
+                    $0.retryableFailure = true
                 }
-            } catch {
-                let message = "system track write failed: \(error)"
-                self.state.withLock { $0.failure = message }
-                FileHandle.standardError.write(Data("\(message)\n".utf8))
+                return
+            }
+            guard buffer.frameLength > 0 else { return } // Empty callbacks aren't proof of capture.
+            let now = Date()
+            let hasSignal = Self.hasSignal(buffer)
+            self.state.withLock { state in
+                guard state.acceptingBuffers, state.failure == nil, let file = state.file else { return }
+                do {
+                    // Stop takes the same lock before teardown. A late callback
+                    // can neither write into a closed file nor another segment.
+                    try file.write(from: buffer)
+                    if state.firstBufferAt == nil { state.firstBufferAt = now }
+                    state.lastBufferAt = now
+                    state.framesWritten += Int64(buffer.frameLength)
+                    if hasSignal { state.lastSignalAt = now }
+                } catch {
+                    state.failure = "system track write failed: \(error)"
+                    state.retryableFailure = false // Storage failures must not create a retry loop.
+                    FileHandle.standardError.write(Data("system track write failed; capture halted\n".utf8))
+                }
             }
         }
-        guard status == noErr, let procID else { throw RecorderError.ioProcCreationFailed(status) }
-
-        status = AudioDeviceStart(aggregateID, procID)
-        guard status == noErr else { throw RecorderError.deviceStartFailed(status) }
+        guard status == noErr, procID != nil else { throw RecorderError.ioProcCreationFailed(status) }
     }
 
     private func cleanup() {
@@ -205,11 +237,11 @@ final class SystemAudioRecorder: @unchecked Sendable {
         state.withLock { $0.file = nil }
     }
 
-    private static func hasSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
+    static func hasSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
         guard let channels = buffer.floatChannelData else { return false }
         let frames = Int(buffer.frameLength)
         for channel in 0..<Int(buffer.format.channelCount) {
-            for frame in 0..<frames where abs(channels[channel][frame]) > 0.0001 {
+            for frame in 0..<frames where abs(channels[channel][frame * buffer.stride]) > 0.0001 {
                 return true
             }
         }

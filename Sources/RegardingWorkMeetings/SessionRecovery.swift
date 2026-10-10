@@ -55,9 +55,13 @@ enum SessionRecovery {
                 report.warnings.append("\(directory.lastPathComponent): existing recovery evidence left untouched")
                 continue
             }
-            guard manifest.files.values.allSatisfy({
-                !$0.isEmpty && !$0.hasPrefix(".") && URL(fileURLWithPath: $0).lastPathComponent == $0
-            }) else {
+            var systemSegments = manifest.system_audio_segments
+            let segmentNames = (systemSegments ?? []).map(\.file)
+            guard manifest.files.values.allSatisfy(SessionMeta.validFilename),
+                  segmentNames.allSatisfy(SessionMeta.validFilename),
+                  Set(segmentNames).count == segmentNames.count,
+                  !segmentNames.contains(manifest.files["mic"] ?? ""),
+                  (systemSegments ?? []).allSatisfy({ $0.offset_ms >= 0 }) else {
                 report.warnings.append("\(directory.lastPathComponent): invalid audio filename; preserved for inspection")
                 continue
             }
@@ -66,16 +70,31 @@ enum SessionRecovery {
             let iso = ISO8601DateFormatter()
             let started = iso.date(from: manifest.started_at) ?? now
             var endpoints = (manifest.last_buffer_at ?? [:]).values.compactMap(iso.date(from:))
-            for (track, filename) in manifest.files {
+            let origin = (manifest.first_buffer_at.values.compactMap(iso.date(from:))
+                + (systemSegments ?? []).compactMap { $0.first_buffer_at.flatMap(iso.date(from:)) }).min() ?? started
+            var sources = manifest.files.map { (track: $0.key, filename: $0.value, index: Optional<Int>.none) }
+            if let segments = systemSegments, !segments.isEmpty {
+                sources.removeAll { $0.track == "system" }
+                sources += segments.enumerated().map { (track: "system", filename: $0.element.file, index: Optional($0.offset)) }
+            }
+            for source in sources {
+                let (track, filename, index) = source
                 let audio = directory.appendingPathComponent(filename)
+                var first = manifest.first_buffer_at[track].flatMap(iso.date(from:)) ?? started
+                if let index, let segment = systemSegments?[index] {
+                    first = segment.first_buffer_at.flatMap(iso.date(from:))
+                        ?? iso.date(from: segment.started_at) ?? started
+                }
                 if audioIsReadable(audio) {
                     readableTracks += 1
                     let previous = manifest.track_health[track]
-                    health[track] = previous?.needsAttention == true ? previous : TrackHealth(
-                        state: .recovered, detail: "readable audio recovered; completeness and audibility require inspection"
-                    )
+                    if health[track] == nil {
+                        health[track] = previous?.needsAttention == true ? previous : TrackHealth(
+                            state: .recovered, detail: "readable audio recovered; completeness and audibility require inspection"
+                        )
+                    }
+                    if let index { systemSegments?[index].capture_started = true }
                     if let duration = audioDuration(audio), duration.isFinite, duration >= 0 {
-                        let first = manifest.first_buffer_at[track].flatMap(iso.date(from:)) ?? started
                         endpoints.append(first.addingTimeInterval(duration))
                     }
                     try? SecureStorage.protectFile(audio)
@@ -85,6 +104,9 @@ enum SessionRecovery {
                         state: .missing,
                         detail: "track was missing, empty, or unreadable during recovery"
                     )
+                }
+                if let index {
+                    systemSegments?[index].offset_ms = max(0, Int(first.timeIntervalSince(origin) * 1000))
                 }
             }
             guard readableTracks > 0 else {
@@ -117,7 +139,15 @@ enum SessionRecovery {
                 microphone_configuration_restarts: manifest.microphone_configuration_restarts,
                 preserved_zero_filled_mic: manifest.preserved_zero_filled_mic,
                 microphone_route_history: manifest.microphone_route_history,
-                track_health_history: manifest.track_health_history
+                track_health_history: manifest.track_health_history,
+                system_audio_segments: systemSegments?.isEmpty == false ? systemSegments : nil,
+                system_capture_interruptions: manifest.system_capture_interruptions,
+                system_recovery_attempts: manifest.system_recovery_attempts,
+                system_output_route_history: manifest.system_output_route_history,
+                app_build: manifest.app_build,
+                macos_version: manifest.macos_version,
+                first_buffer_at: manifest.first_buffer_at,
+                last_buffer_at: manifest.last_buffer_at
             )
             do {
                 try SessionFileWriter.writeMetadata(metadata, to: directory)

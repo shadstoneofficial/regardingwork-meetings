@@ -17,6 +17,12 @@ struct RecordingManifest: Codable, Equatable, Sendable {
     var microphone_device_at_capture: AudioInputDeviceIdentity? = nil
     var microphone_route_history: [MicrophoneRouteObservation]? = nil
     var track_health_history: [String: [TrackHealthObservation]]? = nil
+    var system_audio_segments: [AudioCaptureSegment]? = nil
+    var system_capture_interruptions: [CaptureInterruption]? = nil
+    var system_recovery_attempts: Int? = nil
+    var system_output_route_history: [MicrophoneRouteObservation]? = nil
+    var app_build: AppBuildInfo? = nil
+    var macos_version: String? = nil
 }
 
 struct SessionMetadata: Codable, Equatable, Sendable {
@@ -38,6 +44,34 @@ struct SessionMetadata: Codable, Equatable, Sendable {
     var preserved_zero_filled_mic: String? = nil
     var microphone_route_history: [MicrophoneRouteObservation]? = nil
     var track_health_history: [String: [TrackHealthObservation]]? = nil
+    var system_audio_segments: [AudioCaptureSegment]? = nil
+    var system_capture_interruptions: [CaptureInterruption]? = nil
+    var system_recovery_attempts: Int? = nil
+    var system_output_route_history: [MicrophoneRouteObservation]? = nil
+    var app_build: AppBuildInfo? = nil
+    var macos_version: String? = nil
+    var first_buffer_at: [String: String]? = nil
+    var last_buffer_at: [String: String]? = nil
+}
+
+/// Each restarted tap gets its own AAC CAF. Original audio is never reopened for writing.
+struct AudioCaptureSegment: Codable, Equatable, Sendable {
+    let file: String
+    let started_at: String
+    var offset_ms: Int
+    var first_buffer_at: String? = nil
+    var last_buffer_at: String? = nil
+    var frames_written: Int64 = 0
+    var sample_rate: Double? = nil
+    var capture_started: Bool = false
+    var failure: String? = nil
+}
+
+struct CaptureInterruption: Codable, Equatable, Sendable {
+    let started_at: String
+    let detected_at: String
+    let reason: String
+    var resumed_at: String? = nil
 }
 
 struct MicrophoneRouteObservation: Codable, Equatable, Sendable {
